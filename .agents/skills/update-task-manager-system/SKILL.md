@@ -17,8 +17,7 @@ description: 本リポジトリのTask Managerにソース、DB、API・CLI、�
 ## 頒布・導入の実行境界
 
 - `scripts/publish.ps1`、`scripts/create-distribution.ps1`、`scripts/install.ps1`は、ユーザーが対応する発行、頒布版生成、インストールを明示した場合だけ実行する。
-- 頒布対象に含まれるソース、Skill、文書や、頒布・導入スクリプト自体の変更は、頒布版を生成またはインストールする許可ではない。
-- 明示指示がない開発変更では`scripts/test.ps1`までを検証範囲とし、頒布版を生成していないことを完了時に明示する。
+- 明示指示がない開発変更では`scripts/test.ps1`までを検証範囲とする。
 
 ## 完了条件
 
