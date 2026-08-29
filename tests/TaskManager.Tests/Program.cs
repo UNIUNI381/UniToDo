@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Windows.Forms;
 using Microsoft.Extensions.Logging.Abstractions;
 using TaskManager.Cli;
 using TaskManager.Configuration;
@@ -52,6 +53,7 @@ public static class Program
         await RunTestAsync("Codex送信先設定をSQLiteで保持する", TestCodexSettingsRoundTripAsync);
         await RunTestAsync("音声確認待ちをFIFOで処理する", TestCodexReviewQueueAsync);
         await RunTestAsync("音声確認画面を指定ディスプレイ内へ配置する", TestCodexReviewWindowPlacementAsync);
+        await RunTestAsync("音声状態表示を長文に合わせて拡張し上方へ配置する", TestVoiceInputStatusLayoutAsync);
         await RunTestAsync("Codex送信先未設定時にCLI起動を拒否する", TestCodexUnconfiguredDispatchAsync);
         await RunTestAsync("Codex CLIへ本文を標準入力で渡す", TestCodexCommandDispatchAsync);
         await RunTestAsync("Codex CLI失敗時に本文を確認待ちへ戻す", TestCodexSubmissionFailureAsync);
@@ -946,6 +948,29 @@ public static class Program
         Assert(workingArea.Contains(reviewForm.Bounds), "音声確認画面が指定ディスプレイ領域からはみ出しました。");
         Assert(reviewForm.TopMost, "音声確認画面が最前面表示に設定されていません。");
         Assert(reviewForm.ShowInTaskbar, "音声確認画面がタスクバーから選択できません。");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>音声状態表示が長文を省略せず、TypeWhisperと重ならない高さへ配置されることを検証する。</summary>
+    private static Task TestVoiceInputStatusLayoutAsync()
+    {
+        // 長い状態文でフォーム幅と必要な場合の行高が増えることを確認する。
+        using VoiceInputStatusForm statusForm = new();
+        string longMessage = string.Concat(Enumerable.Repeat("長い音声入力の処理状況を省略せず表示します。", 12));
+        statusForm.UpdateStatus(new VoiceInputStatus(longMessage, VoiceInputStatusKind.Progress));
+        Label statusLabel = statusForm.Controls.OfType<Label>().Single();
+        Size measuredTextSize = TextRenderer.MeasureText(
+            longMessage,
+            statusLabel.Font,
+            new Size(statusLabel.Width, int.MaxValue),
+            TextFormatFlags.NoPadding | TextFormatFlags.WordBreak);
+        Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
+
+        Assert(statusForm.ClientSize.Width > 390, "長い状態文に合わせて表示幅が広がりませんでした。");
+        Assert(!statusLabel.AutoEllipsis, "音声状態文が省略記号付きの表示になっています。");
+        Assert(statusLabel.Height >= measuredTextSize.Height, "長い状態文の全行を表示できる高さがありません。");
+        Assert(workingArea.Contains(statusForm.Bounds), "音声状態表示が作業領域からはみ出しました。");
+        Assert(workingArea.Bottom - statusForm.Bottom >= 120, "音声状態表示がTypeWhisper表示を避ける高さへ移動していません。");
         return Task.CompletedTask;
     }
 

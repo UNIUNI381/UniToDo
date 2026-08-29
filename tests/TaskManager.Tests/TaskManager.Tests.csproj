@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>TaskManager.Tests</AssemblyName>
     <RootNamespace>TaskManager.Tests</RootNamespace>
   </PropertyGroup>

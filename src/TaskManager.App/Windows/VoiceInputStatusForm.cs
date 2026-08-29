@@ -8,8 +8,12 @@ public sealed class VoiceInputStatusForm : Form
 {
     private const int NoActivateExtendedStyle = 0x08000000;
     private const int ToolWindowExtendedStyle = 0x00000080;
-    private const int CompactWidth = 390;
-    private const int CompactHeight = 82;
+    private const int CompactMinimumWidth = 390;
+    private const int CompactMaximumWidth = 900;
+    private const int CompactMinimumStatusHeight = 30;
+    private const int CompactHorizontalPadding = 36;
+    private const int CompactScreenMargin = 24;
+    private const int BottomMargin = 120;
     private const int MaximumDetailWidth = 684;
     private const int MaximumDetailHeight = 180;
 
@@ -26,7 +30,7 @@ public sealed class VoiceInputStatusForm : Form
         // 作業中アプリのフォーカスを維持する小型ポップアップを構成する。
         AutoScaleMode = AutoScaleMode.Dpi;
         BackColor = Color.FromArgb(32, 34, 39);
-        ClientSize = new Size(CompactWidth, CompactHeight);
+        ClientSize = new Size(CompactMinimumWidth, 82);
         ControlBox = false;
         FormBorderStyle = FormBorderStyle.None;
         MaximizeBox = false;
@@ -38,7 +42,7 @@ public sealed class VoiceInputStatusForm : Form
 
         statusLabel = new Label
         {
-            AutoEllipsis = true,
+            AutoEllipsis = false,
             ForeColor = Color.White,
             Font = new Font(Control.DefaultFont.FontFamily, 10.5F, FontStyle.Regular),
             Location = new Point(18, 14),
@@ -91,7 +95,7 @@ public sealed class VoiceInputStatusForm : Form
         closeTimer.Tick += HandleCloseTimer;
     }
 
-    /// <summary>表示時にマウス位置の画面中央下へ配置する。</summary>
+    /// <summary>表示時にマウス位置の画面中央下から少し上へ配置する。</summary>
     protected override void OnShown(EventArgs eventArguments)
     {
         // 複数画面環境では利用者が現在操作している画面へ表示する。
@@ -102,24 +106,20 @@ public sealed class VoiceInputStatusForm : Form
     /// <summary>音声入力の状態文と表示時間を更新する。</summary>
     public void UpdateStatus(VoiceInputStatus status)
     {
-        // Codex応答は拡大表示し、通常の起動状態は従来の小型表示へ戻す。
+        // Codex応答は拡大表示し、通常の起動状態はメッセージ量に合わせて調整する。
         closeTimer.Stop();
         if (status.IsDetailed)
         {
             ShowDetailedStatus(status);
             return;
         }
-        ClientSize = new Size(CompactWidth, CompactHeight);
-        statusLabel.Location = new Point(18, 14);
-        statusLabel.Size = new Size(354, 30);
         statusLabel.Text = status.Message;
         statusLabel.ForeColor = status.Kind == VoiceInputStatusKind.Error
             ? Color.FromArgb(255, 180, 180)
             : Color.White;
         detailTextBox.Visible = false;
         closeButton.Visible = false;
-        progressBar.Location = new Point(18, 56);
-        progressBar.Size = new Size(354, 5);
+        UpdateCompactLayout(status.Message);
         progressBar.Visible = true;
         progressBar.Style = status.Kind == VoiceInputStatusKind.Progress
             ? ProgressBarStyle.Marquee
@@ -131,6 +131,40 @@ public sealed class VoiceInputStatusForm : Form
             closeTimer.Start();
         }
         PositionAtBottomCenter();
+    }
+
+    /// <summary>通常状態の幅と高さをメッセージ全体が読める寸法へ調整する。</summary>
+    private void UpdateCompactLayout(string message)
+    {
+        // まず横幅を広げ、画面内の上限へ達した場合は省略せず複数行へ折り返す。
+        Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
+        int availableScreenWidth = Math.Max(1, workingArea.Width - (CompactScreenMargin * 2));
+        int maximumClientWidth = Math.Min(CompactMaximumWidth, availableScreenWidth);
+        int minimumClientWidth = Math.Min(CompactMinimumWidth, maximumClientWidth);
+        Size singleLineSize = TextRenderer.MeasureText(
+            message,
+            statusLabel.Font,
+            new Size(int.MaxValue, int.MaxValue),
+            TextFormatFlags.NoPadding | TextFormatFlags.SingleLine);
+        int clientWidth = Math.Clamp(
+            singleLineSize.Width + CompactHorizontalPadding,
+            minimumClientWidth,
+            maximumClientWidth);
+        int contentWidth = Math.Max(1, clientWidth - CompactHorizontalPadding);
+        Size wrappedTextSize = TextRenderer.MeasureText(
+            message,
+            statusLabel.Font,
+            new Size(contentWidth, int.MaxValue),
+            TextFormatFlags.NoPadding | TextFormatFlags.WordBreak);
+        int statusHeight = Math.Max(CompactMinimumStatusHeight, wrappedTextSize.Height);
+
+        // 状態文の下へ進捗バーと余白を積み、内容量に応じたフォーム高を設定する。
+        int progressTop = 14 + statusHeight + 12;
+        ClientSize = new Size(clientWidth, progressTop + 26);
+        statusLabel.Location = new Point(18, 14);
+        statusLabel.Size = new Size(contentWidth, statusHeight);
+        progressBar.Location = new Point(18, progressTop);
+        progressBar.Size = new Size(contentWidth, 5);
     }
 
     /// <summary>Codex CLIの応答を内容量に合わせた詳細画面へ表示する。</summary>
@@ -182,13 +216,14 @@ public sealed class VoiceInputStatusForm : Form
         PositionAtBottomCenter();
     }
 
-    /// <summary>現在の寸法でマウス位置の画面中央下へ配置する。</summary>
+    /// <summary>現在の寸法でマウス位置の画面中央下から少し上へ配置する。</summary>
     private void PositionAtBottomCenter()
     {
-        // 横方向の中央位置を作業領域から算出し、タスクバーの少し上へ配置する。
+        // 横方向を中央へ揃え、TypeWhisperの表示と重ならない下端余白を確保する。
         Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
         int horizontalPosition = workingArea.Left + ((workingArea.Width - Width) / 2);
-        Location = new Point(horizontalPosition, workingArea.Bottom - Height - 24);
+        int verticalPosition = Math.Max(workingArea.Top, workingArea.Bottom - Height - BottomMargin);
+        Location = new Point(horizontalPosition, verticalPosition);
     }
 
     /// <summary>成功または失敗の表示時間が過ぎたら画面を閉じる。</summary>
