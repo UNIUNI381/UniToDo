@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using TaskManager.Services;
 
 namespace TaskManager.Windows;
 
@@ -88,8 +89,8 @@ public sealed class TypeWhisperApiClient(HttpClient httpClient)
         }
     }
 
-    /// <summary>TypeWhisperへ録音停止を要求し、受付結果を検証する。</summary>
-    public async Task StopRecordingAsync(CancellationToken cancellationToken)
+    /// <summary>TypeWhisperへ録音停止を要求し、文字起こしセッションIDを返す。</summary>
+    public async Task<Guid> StopRecordingAsync(CancellationToken cancellationToken)
     {
         // ホットキーの取りこぼしを避け、録音中セッションへAPIで直接停止を要求する。
         using HttpRequestMessage request = CreateRequest(HttpMethod.Post, "v1/dictation/stop");
@@ -104,6 +105,53 @@ public sealed class TypeWhisperApiClient(HttpClient httpClient)
         {
             throw new InvalidOperationException("TypeWhisperが録音停止を確認できませんでした。");
         }
+        string? sessionIdentifierText = GetOptionalString(responseDocument.RootElement, "id");
+        if (!Guid.TryParse(sessionIdentifierText, out Guid sessionIdentifier))
+        {
+            throw new InvalidOperationException("TypeWhisperの文字起こしセッションIDが不正です。");
+        }
+        return sessionIdentifier;
+    }
+
+    /// <summary>指定したTypeWhisper文字起こしセッションの現在結果を取得する。</summary>
+    public async Task<TypeWhisperRecognitionResult> GetRecognitionResultAsync(
+        Guid sessionIdentifier,
+        CancellationToken cancellationToken)
+    {
+        // 録音停止後の処理状態を追跡し、空本文を確認画面待ちから正常終了へ分岐させる。
+        string requestPath = $"v1/dictation/transcription?id={Uri.EscapeDataString(sessionIdentifier.ToString())}";
+        using HttpRequestMessage request = CreateRequest(HttpMethod.Get, requestPath);
+        using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
+        using JsonDocument responseDocument = await ReadSuccessDocumentAsync(
+            response,
+            "TypeWhisperの文字起こし結果を確認できませんでした。",
+            cancellationToken);
+        JsonElement responseRoot = responseDocument.RootElement;
+        string? status = GetOptionalString(responseRoot, "status");
+        if (string.Equals(status, "recording", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(status, "processing", StringComparison.OrdinalIgnoreCase))
+        {
+            return new TypeWhisperRecognitionResult(TypeWhisperRecognitionResultKind.Processing);
+        }
+        if (string.Equals(status, "completed", StringComparison.OrdinalIgnoreCase))
+        {
+            string? transcriptionText = responseRoot.TryGetProperty("transcription", out JsonElement transcriptionElement)
+                && transcriptionElement.ValueKind == JsonValueKind.Object
+                    ? GetOptionalString(transcriptionElement, "text")
+                    : null;
+            return string.IsNullOrWhiteSpace(transcriptionText)
+                ? new TypeWhisperRecognitionResult(TypeWhisperRecognitionResultKind.NoSpeech)
+                : new TypeWhisperRecognitionResult(TypeWhisperRecognitionResultKind.Completed);
+        }
+        if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+        {
+            string errorMessage = GetOptionalString(responseRoot, "error") ?? string.Empty;
+            TypeWhisperRecognitionResultKind resultKind = IsNoSpeechError(errorMessage)
+                ? TypeWhisperRecognitionResultKind.NoSpeech
+                : TypeWhisperRecognitionResultKind.Failed;
+            return new TypeWhisperRecognitionResult(resultKind, errorMessage);
+        }
+        throw new InvalidOperationException("TypeWhisperの文字起こし状態応答が不正です。");
     }
 
     /// <summary>TypeWhisperが現在録音中かをAPIから取得する。</summary>
@@ -253,6 +301,27 @@ public sealed class TypeWhisperApiClient(HttpClient httpClient)
             && propertyElement.ValueKind == JsonValueKind.String
                 ? propertyElement.GetString()
                 : null;
+    }
+
+    /// <summary>TypeWhisperのローカライズ済みエラーが無音または短すぎる音声を示すか判定する。</summary>
+    private static bool IsNoSpeechError(string errorMessage)
+    {
+        // 現行版で提供される各言語の無音系メッセージを通常終了へ統一する。
+        string[] noSpeechMessages =
+        [
+            "音声が検出されません",
+            "短すぎます",
+            "No speech",
+            "Too short",
+            "Keine Sprache",
+            "Zu kurz",
+            "Речь не обнаружена",
+            "Слишком коротко",
+            "未检测到语音",
+            "时间太短"
+        ];
+        return noSpeechMessages.Any(message =>
+            errorMessage.Contains(message, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>TypeWhisperのエラー応答を状態画面へ収まる長さに整える。</summary>

@@ -127,11 +127,20 @@ public sealed class VoiceInputRuntime(
         return typeWhisper.IsRecordingAsync(cancellationToken);
     }
 
-    /// <summary>TypeWhisperの録音を停止する。</summary>
-    public Task StopTypeWhisperRecognitionAsync(CancellationToken cancellationToken)
+    /// <summary>TypeWhisperの録音を停止し、文字起こしセッションIDを返す。</summary>
+    public Task<Guid> StopTypeWhisperRecognitionAsync(CancellationToken cancellationToken)
     {
         // F15の取りこぼしを避け、現在の録音セッションをAPIで直接停止する。
         return typeWhisper.StopRecordingAsync(cancellationToken);
+    }
+
+    /// <summary>TypeWhisperの文字起こしセッション結果を返す。</summary>
+    public Task<TypeWhisperRecognitionResult> GetTypeWhisperRecognitionResultAsync(
+        Guid sessionIdentifier,
+        CancellationToken cancellationToken)
+    {
+        // 停止APIで得たIDを使い、無音を含む文字起こしの終端状態を取得する。
+        return typeWhisper.GetRecognitionResultAsync(sessionIdentifier, cancellationToken);
     }
 
     /// <summary>指定名のプロセスが1件以上存在するかを返す。</summary>

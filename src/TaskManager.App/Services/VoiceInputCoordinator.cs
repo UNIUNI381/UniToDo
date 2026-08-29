@@ -15,6 +15,20 @@ public sealed record VoiceInputStatus(
     string Heading = "",
     bool IsDetailed = false);
 
+/// <summary>TypeWhisperの文字起こしセッション結果種別を表す。</summary>
+public enum TypeWhisperRecognitionResultKind
+{
+    Processing,
+    Completed,
+    NoSpeech,
+    Failed
+}
+
+/// <summary>TypeWhisperの文字起こしセッション結果を保持する。</summary>
+public sealed record TypeWhisperRecognitionResult(
+    TypeWhisperRecognitionResultKind Kind,
+    string ErrorMessage = "");
+
 /// <summary>音声入力に必要なローカルアプリとTypeWhisper API操作を抽象化する。</summary>
 public interface IVoiceInputRuntime
 {
@@ -45,8 +59,13 @@ public interface IVoiceInputRuntime
     /// <summary>TypeWhisperが現在録音中かを返す。</summary>
     Task<bool> IsTypeWhisperRecordingAsync(CancellationToken cancellationToken);
 
-    /// <summary>TypeWhisperの録音を停止する。</summary>
-    Task StopTypeWhisperRecognitionAsync(CancellationToken cancellationToken);
+    /// <summary>TypeWhisperの録音を停止し、文字起こしセッションIDを返す。</summary>
+    Task<Guid> StopTypeWhisperRecognitionAsync(CancellationToken cancellationToken);
+
+    /// <summary>TypeWhisperの文字起こしセッション結果を返す。</summary>
+    Task<TypeWhisperRecognitionResult> GetTypeWhisperRecognitionResultAsync(
+        Guid sessionIdentifier,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>音声入力の起動待ち時間を保持する。</summary>
@@ -57,6 +76,9 @@ public sealed class VoiceInputCoordinatorOptions
 
     // 準備状況を再確認する間隔を保持する。
     public TimeSpan PollingInterval { get; init; } = TimeSpan.FromMilliseconds(250);
+
+    // 録音停止後に文字起こし結果を待つ上限時間を保持する。
+    public TimeSpan RecognitionResultTimeout { get; init; } = TimeSpan.FromMinutes(2);
 
 }
 
@@ -102,6 +124,9 @@ public sealed class VoiceInputCoordinator(
 
     // 最後に確認できたTypeWhisperの録音状態を保持する。
     private int recordingActive;
+
+    // 新しい録音が古い文字起こし結果に表示を上書きされないための世代を保持する。
+    private int recognitionGeneration;
 
     /// <summary>画面へ通知する準備状況の変更を公開する。</summary>
     public event Action<VoiceInputStatus>? StatusChanged;
@@ -168,6 +193,7 @@ public sealed class VoiceInputCoordinator(
     private async Task StartNewRecognitionAsync(CancellationToken cancellationToken)
     {
         // 2回目のF13だけで開始待ちを取り消せるよう、アプリ終了トークンとは別の取消し元を登録する。
+        Interlocked.Increment(ref recognitionGeneration);
         using CancellationTokenSource startCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         RegisterRecognitionStart(startCancellation);
@@ -222,10 +248,11 @@ public sealed class VoiceInputCoordinator(
     {
         // 停止APIの応答だけでなく実録音状態がfalseになるまで確認する。
         PublishStatus("音声認識を停止しています…", VoiceInputStatusKind.Progress);
-        await StopRecognitionOrConfirmStoppedAsync(cancellationToken);
+        Guid? sessionIdentifier = await StopRecognitionOrConfirmStoppedAsync(cancellationToken);
         Volatile.Write(ref recordingActive, 0);
         _ = StartOllamaPreparation(cancellationToken, false);
         PublishStatus("音声認識を停止しました。文字起こしと校正を待っています…", VoiceInputStatusKind.Progress);
+        StartRecognitionResultObservation(sessionIdentifier, Volatile.Read(ref recognitionGeneration), cancellationToken);
     }
 
     /// <summary>開始途中の取消しを録音停止または準備取消しとして完了させる。</summary>
@@ -234,10 +261,11 @@ public sealed class VoiceInputCoordinator(
         // 開始API送信後は本体で録音が始まっている可能性があるため、停止状態を必ず確認する。
         if (Volatile.Read(ref recognitionStartRequested) == 1)
         {
-            await StopRecognitionOrConfirmStoppedAsync(cancellationToken);
+            Guid? sessionIdentifier = await StopRecognitionOrConfirmStoppedAsync(cancellationToken);
             Volatile.Write(ref recordingActive, 0);
             _ = StartOllamaPreparation(cancellationToken, false);
             PublishStatus("音声認識を停止しました。文字起こしと校正を待っています…", VoiceInputStatusKind.Progress);
+            StartRecognitionResultObservation(sessionIdentifier, Volatile.Read(ref recognitionGeneration), cancellationToken);
             return;
         }
         Volatile.Write(ref recordingActive, 0);
@@ -245,28 +273,117 @@ public sealed class VoiceInputCoordinator(
     }
 
     /// <summary>停止要求を送り、すでに停止済みの場合も正常な停止として扱う。</summary>
-    private async Task StopRecognitionOrConfirmStoppedAsync(CancellationToken cancellationToken)
+    private async Task<Guid?> StopRecognitionOrConfirmStoppedAsync(CancellationToken cancellationToken)
     {
         // Esc停止や開始取消しとの競合時は、API実状態が停止済みなら停止APIの不成功をエラーにしない。
         bool? recordingBeforeStop = await TryReadTypeWhisperRecordingStateAsync(cancellationToken);
         if (recordingBeforeStop == false)
         {
-            return;
+            return null;
         }
+        Guid sessionIdentifier;
         try
         {
-            await runtime.StopTypeWhisperRecognitionAsync(cancellationToken);
+            sessionIdentifier = await runtime.StopTypeWhisperRecognitionAsync(cancellationToken);
         }
         catch (Exception stopError) when (IsRecoverableTypeWhisperStatusError(stopError))
         {
             bool? recordingAfterError = await TryReadTypeWhisperRecordingStateAsync(cancellationToken);
             if (recordingAfterError == false)
             {
-                return;
+                return null;
             }
             throw;
         }
         await WaitUntilTypeWhisperRecordingStateAsync(false, cancellationToken);
+        return sessionIdentifier;
+    }
+
+    /// <summary>録音停止後の文字起こし結果監視をバックグラウンドで開始する。</summary>
+    private void StartRecognitionResultObservation(
+        Guid? sessionIdentifier,
+        int stoppedRecognitionGeneration,
+        CancellationToken cancellationToken)
+    {
+        // API停止前に本体側ですでに停止していた場合は、追跡可能なセッションIDがないため監視しない。
+        if (sessionIdentifier is null)
+        {
+            return;
+        }
+        _ = ObserveRecognitionResultAsync(
+            sessionIdentifier.Value,
+            stoppedRecognitionGeneration,
+            cancellationToken);
+    }
+
+    /// <summary>TypeWhisperの文字起こしセッションを終端状態まで監視する。</summary>
+    private async Task ObserveRecognitionResultAsync(
+        Guid sessionIdentifier,
+        int stoppedRecognitionGeneration,
+        CancellationToken cancellationToken)
+    {
+        // 新しい録音開始後は古い結果で現在の状態表示を上書きしない。
+        DateTimeOffset deadline = clock.GetUtcNow() + options.RecognitionResultTimeout;
+        while (clock.GetUtcNow() < deadline)
+        {
+            if (Volatile.Read(ref recognitionGeneration) != stoppedRecognitionGeneration)
+            {
+                return;
+            }
+
+            try
+            {
+                TypeWhisperRecognitionResult result =
+                    await runtime.GetTypeWhisperRecognitionResultAsync(sessionIdentifier, cancellationToken);
+                if (Volatile.Read(ref recognitionGeneration) != stoppedRecognitionGeneration)
+                {
+                    return;
+                }
+                if (result.Kind == TypeWhisperRecognitionResultKind.Processing)
+                {
+                    await Task.Delay(options.PollingInterval, clock, cancellationToken);
+                    continue;
+                }
+                if (result.Kind == TypeWhisperRecognitionResultKind.Completed)
+                {
+                    // 本文ありの完了時は直後に出力プラグインが確認APIを呼ぶため、表示を変更しない。
+                    return;
+                }
+                if (result.Kind == TypeWhisperRecognitionResultKind.NoSpeech)
+                {
+                    PublishStatus(
+                        "音声が検出されなかったため、音声入力を終了しました",
+                        VoiceInputStatusKind.Success);
+                    return;
+                }
+
+                string failureMessage = string.IsNullOrWhiteSpace(result.ErrorMessage)
+                    ? "TypeWhisperが文字起こしを完了できませんでした。"
+                    : ShortenError(result.ErrorMessage);
+                PublishStatus($"文字起こしを完了できません: {failureMessage}", VoiceInputStatusKind.Error);
+                return;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception resultError) when (IsRecoverableTypeWhisperStatusError(resultError))
+            {
+                // 処理中の一時的なAPI障害は期限まで再試行し、無音判定の取りこぼしを避ける。
+                applicationLogger.LogDebug(
+                    resultError,
+                    "TypeWhisper recognition result could not be read temporarily for session {SessionIdentifier}.",
+                    sessionIdentifier);
+                await Task.Delay(options.PollingInterval, clock, cancellationToken);
+            }
+        }
+
+        if (Volatile.Read(ref recognitionGeneration) == stoppedRecognitionGeneration)
+        {
+            PublishStatus(
+                "TypeWhisperの文字起こし結果を確認できませんでした。もう一度音声入力をお試しください",
+                VoiceInputStatusKind.Error);
+        }
     }
 
     /// <summary>TypeWhisper APIの実録音状態を内部状態へ同期して返す。</summary>

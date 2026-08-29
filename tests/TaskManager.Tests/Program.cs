@@ -63,6 +63,8 @@ public static class Program
         await RunTestAsync("録音中の2回目のF13でAPI停止を確認する", TestVoiceInputSecondPressStopsAsync);
         await RunTestAsync("TypeWhisper停止確認前に校正待ちを表示しない", TestVoiceInputStopAcknowledgementAsync);
         await RunTestAsync("TypeWhisper停止失敗時に録音状態を維持する", TestVoiceInputStopFailureAsync);
+        await RunTestAsync("無音終了時に校正待ち表示を終了する", TestVoiceInputNoSpeechCompletionAsync);
+        await RunTestAsync("古い無音結果で新規録音表示を上書きしない", TestVoiceInputStaleNoSpeechResultAsync);
         await RunTestAsync("TypeWhisper APIで音声校正を開始停止する", TestTypeWhisperApiControlAsync);
         await RunTestAsync("TypeWhisper連携導入時にローカルAPIを有効化する", TestTypeWhisperInstallerEnablesApiAsync);
         await RunTestAsync("Ollama事前ロード要求を正しく構成する", TestOllamaPreloadRequestAsync);
@@ -1289,6 +1291,61 @@ public static class Program
             "停止失敗を停止済みとして校正待ち表示へ進みました。");
     }
 
+    /// <summary>TypeWhisperが無音判定した場合に確認画面待ちを正常終了することを検証する。</summary>
+    private static async Task TestVoiceInputNoSpeechCompletionAsync()
+    {
+        // 録音停止後のセッション結果を無音にして、校正待ち表示が残らないことを確認する。
+        RecordingVoiceInputRuntime voiceInputRuntime = new()
+        {
+            OllamaReady = true,
+            OllamaRunning = true,
+            TypeWhisperRunning = true,
+            RecognitionResult = new TypeWhisperRecognitionResult(
+                TypeWhisperRecognitionResultKind.NoSpeech,
+                "音声が検出されませんでした")
+        };
+        VoiceInputCoordinator coordinator = CreateVoiceInputCoordinator(voiceInputRuntime);
+        List<VoiceInputStatus> statuses = [];
+        coordinator.StatusChanged += statuses.Add;
+
+        await coordinator.StartAsync(CancellationToken.None);
+        await coordinator.StartAsync(CancellationToken.None);
+
+        Assert(voiceInputRuntime.RecognitionResultReadCount == 1, "無音セッション結果が確認されませんでした。");
+        Assert(
+            statuses.LastOrDefault()?.Message == "音声が検出されなかったため、音声入力を終了しました"
+            && statuses.LastOrDefault()?.Kind == VoiceInputStatusKind.Success,
+            "無音終了後に校正待ち表示が正常終了へ切り替わりませんでした。");
+    }
+
+    /// <summary>処理中だった古い無音結果が新しい録音状態を上書きしないことを検証する。</summary>
+    private static async Task TestVoiceInputStaleNoSpeechResultAsync()
+    {
+        // 最初の文字起こし結果を保留したまま次の録音を開始し、結果到着時の世代判定を確認する。
+        TaskCompletionSource<TypeWhisperRecognitionResult> resultCompletion =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        RecordingVoiceInputRuntime voiceInputRuntime = new()
+        {
+            OllamaReady = true,
+            OllamaRunning = true,
+            TypeWhisperRunning = true,
+            RecognitionResultCompletion = resultCompletion
+        };
+        VoiceInputCoordinator coordinator = CreateVoiceInputCoordinator(voiceInputRuntime);
+        List<VoiceInputStatus> statuses = [];
+        coordinator.StatusChanged += statuses.Add;
+
+        await coordinator.StartAsync(CancellationToken.None);
+        await coordinator.StartAsync(CancellationToken.None);
+        await coordinator.StartAsync(CancellationToken.None);
+        resultCompletion.SetResult(new TypeWhisperRecognitionResult(TypeWhisperRecognitionResultKind.NoSpeech));
+        await Task.Delay(30);
+
+        Assert(
+            statuses.LastOrDefault()?.Message == "音声認識を開始しました",
+            "古い無音結果が新しく開始した録音の表示を上書きしました。");
+    }
+
     /// <summary>TypeWhisper APIの準備確認、ワークフロー開始、状態確認、停止要求を検証する。</summary>
     private static async Task TestTypeWhisperApiControlAsync()
     {
@@ -1304,8 +1361,13 @@ public static class Program
         Assert(await apiClient.IsReadyAsync(CancellationToken.None), "TypeWhisperのダウンロード済み選択モデルを録音開始可能と判定できませんでした。");
         await apiClient.StartCorrectionRecordingAsync(CancellationToken.None);
         Assert(await apiClient.IsRecordingAsync(CancellationToken.None), "TypeWhisperの録音開始状態を取得できませんでした。");
-        await apiClient.StopRecordingAsync(CancellationToken.None);
+        Guid sessionIdentifier = await apiClient.StopRecordingAsync(CancellationToken.None);
         Assert(!await apiClient.IsRecordingAsync(CancellationToken.None), "TypeWhisperの録音停止状態を取得できませんでした。");
+        TypeWhisperRecognitionResult recognitionResult =
+            await apiClient.GetRecognitionResultAsync(sessionIdentifier, CancellationToken.None);
+        Assert(
+            recognitionResult.Kind == TypeWhisperRecognitionResultKind.NoSpeech,
+            "TypeWhisperの無音セッション結果を判定できませんでした。");
         Assert(
             messageHandler.StartRequestBody.Contains("f3e169bf-39f6-4563-b85c-70e51f3d9a5a", StringComparison.Ordinal),
             "音声校正ワークフローIDが録音開始APIへ渡されませんでした。");
@@ -1388,7 +1450,8 @@ public static class Program
             new VoiceInputCoordinatorOptions
             {
                 ReadinessTimeout = TimeSpan.FromSeconds(1),
-                PollingInterval = TimeSpan.FromMilliseconds(10)
+                PollingInterval = TimeSpan.FromMilliseconds(10),
+                RecognitionResultTimeout = TimeSpan.FromSeconds(1)
             },
             TimeProvider.System,
             NullLogger<VoiceInputCoordinator>.Instance);
@@ -2571,6 +2634,7 @@ public static class Program
         public int ModelLoadCount { get; private set; }
         public int RecognitionStartCount { get; private set; }
         public int RecognitionStopCount { get; private set; }
+        public int RecognitionResultReadCount { get; private set; }
         public List<string> Operations { get; } = [];
         // モデルロード、録音開始、録音停止をテスト側の任意時点まで保留する合図を保持する。
         public TaskCompletionSource? ModelLoadCompletion { get; init; }
@@ -2578,6 +2642,11 @@ public static class Program
         public TaskCompletionSource? RecognitionStopCompletion { get; init; }
         // 録音停止時に返す任意の障害を保持する。
         public Exception? RecognitionStopError { get; init; }
+        // 録音停止後に返す文字起こしセッション結果を保持する。
+        public TypeWhisperRecognitionResult RecognitionResult { get; init; } =
+            new(TypeWhisperRecognitionResultKind.Completed);
+        // 文字起こし結果取得をテスト側の任意時点まで保留する合図を保持する。
+        public TaskCompletionSource<TypeWhisperRecognitionResult>? RecognitionResultCompletion { get; init; }
 
         /// <summary>設定されたOllama API準備状態を返す。</summary>
         public Task<bool> IsOllamaReadyAsync(CancellationToken cancellationToken)
@@ -2669,8 +2738,8 @@ public static class Program
             return Task.FromResult(TypeWhisperRecording);
         }
 
-        /// <summary>TypeWhisperの録音停止を記録して任意の合図後に完了する。</summary>
-        public async Task StopTypeWhisperRecognitionAsync(CancellationToken cancellationToken)
+        /// <summary>TypeWhisperの録音停止を記録して任意の合図後にセッションIDを返す。</summary>
+        public async Task<Guid> StopTypeWhisperRecognitionAsync(CancellationToken cancellationToken)
         {
             // 停止APIの成功、待機、失敗をテストケースの指定どおりに再現する。
             RecognitionStopCount += 1;
@@ -2684,6 +2753,19 @@ public static class Program
                 await RecognitionStopCompletion.Task.WaitAsync(cancellationToken);
             }
             TypeWhisperRecording = false;
+            return Guid.Parse("11111111-1111-1111-1111-111111111111");
+        }
+
+        /// <summary>設定されたTypeWhisper文字起こしセッション結果を返す。</summary>
+        public async Task<TypeWhisperRecognitionResult> GetTypeWhisperRecognitionResultAsync(
+            Guid sessionIdentifier,
+            CancellationToken cancellationToken)
+        {
+            // 外部APIへ接続せず読取回数と固定結果を返す。
+            RecognitionResultReadCount += 1;
+            return RecognitionResultCompletion is null
+                ? RecognitionResult
+                : await RecognitionResultCompletion.Task.WaitAsync(cancellationToken);
         }
     }
 
@@ -2729,6 +2811,10 @@ public static class Program
             {
                 recording = false;
                 return JsonResponse("{\"id\":\"11111111-1111-1111-1111-111111111111\",\"status\":\"stopped\"}");
+            }
+            if (requestPath == "/v1/dictation/transcription" && request.Method == HttpMethod.Get)
+            {
+                return JsonResponse("{\"id\":\"11111111-1111-1111-1111-111111111111\",\"status\":\"failed\",\"transcription\":null,\"error\":\"音声が検出されませんでした\"}");
             }
             return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound)
             {
