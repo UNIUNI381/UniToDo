@@ -57,6 +57,19 @@ if ($matches.Count -ne 1) { throw "対象IDの一致件数が不正です。" }
 - 一部反映時は後続処理や同一入力の再送を行わない。
 - 下書きの`postProcessingSucceeded: false`は保存済み警告である。`batchIdentifier`を使って`draft get`し、重複登録しない。
 
+## 手動バックアップ
+
+完全削除など、復元が難しい変更の直前に限り、Task ManagerのループバックAPIでオンラインバックアップを作成する。タスク、プロジェクト、作業時間の操作にはこのAPIを使わない。
+
+```powershell
+$backupResult = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:48120/api/v1/backup"
+if ([string]::IsNullOrWhiteSpace([string]$backupResult.backupPath)) {
+    throw "Task Managerの手動バックアップを確認できませんでした。"
+}
+```
+
+APIが失敗した場合は破壊的な変更を実行しない。返されたパスのDB内容を直接開いたり、Gitや文書へコピーしたりしない。
+
 ## プロジェクト解決
 
 `prepare`の`resolved`だけを自動採用する。`ambiguous`または`not_found`では低確信候補をユーザーへ示す。候補不足時は`project list --json`と`list --status 実行中 --json`を参照し、確認後だけ別名登録する。

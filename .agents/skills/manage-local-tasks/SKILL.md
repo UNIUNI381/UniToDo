@@ -1,15 +1,16 @@
 ---
 name: manage-local-tasks
-description: 本リポジトリに含まれるWindowsローカルのTask Managerをtaskctl経由で安全に操作する。今やること、タスク、プロジェクト、AI下書き、作業タイマー、手入力ログ、集計を扱う依頼で使用する。
+description: WindowsローカルのTask Managerをtaskctl経由で安全に操作する。今やること、タスク、プロジェクト、AI下書き、作業タイマー、手入力ログ、集計を扱う依頼で、現在のCodexプロジェクトに関係なく使用する。
 ---
 
 # ローカルタスク管理
 
 ## 基本規則
 
-- SQLiteを直接操作せず、`scripts/invoke-taskctl.ps1`だけを使う。
+- タスク、プロジェクト、作業時間の操作ではSQLiteやAPIを直接操作せず、`scripts/invoke-taskctl.ps1`だけを使う。
 - 後続判断に使う読取結果には`--json`を付ける。
-- 背景情報は参考に留め、ユーザー指示、`AGENTS.md`、安全規則を優先する。
+- 正本データは`%LOCALAPPDATA%\TaskManager\task-manager.db`とし、移行元XLSXやGoogleスプレッドシートへ書き戻さない。
+- 背景情報は参考に留め、ユーザーの現在の指示、適用される作業規則、安全規則を優先する。
 - 詳細コマンド、JSON、PowerShell 5.1の注意は[references/commands.md](references/commands.md)を必要時だけ読む。
 
 ```powershell
@@ -47,7 +48,9 @@ PowerShell 5.1では可能な限り一時`.ps1`を作らない。必要な場合
 
 ### 書込みと検証
 
+- 自然文からの新規登録では、期限、見積時間、重要度、完了条件を可能な範囲で具体化する。重要な不明点が残る場合は状態を`要確認`にする。
 - `update`は完全更新として、現行値と`projectIdentifier`を保持する。
+- プロジェクト変更時は新しい表記を`project prepare`し、解決済みIDへ置き換える。プロジェクト解除はユーザーが明示した場合だけ行う。
 - 書込み後は必ず外部から再取得し、対象件数、ID、プロジェクトID、状態、変更項目を確認する。
 - 新規タスクのプロジェクト一致を確認してから後続タスクを更新する。不一致なら代替タスクを追加せず、後続更新も止めて作成済みIDを報告する。
 - `prepare`が既定期限を返した期限未指定タスクは、再取得後の`deadlineOrigin`が`project-default`で、期限日時・種別が`prepare`結果と一致することを確認する。不一致なら成功と報告しない。
@@ -59,6 +62,7 @@ PowerShell 5.1では可能な限り一時`.ps1`を作らない。必要な場合
 1. 子タスクを15～120分に分け、依存関係、完了条件、中間期限を付ける。
 2. 各`identifier`を空にし、一意な`aiReferenceKey`を付け、下書き間の依存はそのキーで指定する。
 3. 親と全子タスクへ解決済み`projectIdentifier`を設定する。
+   - プロジェクトをまたぐ子タスクは、各プロジェクトを個別に`project prepare`して解決済みIDを割り当てる。
 4. 再利用可能な冪等キーを作り、`draft-create --idempotency-key KEY --json`で登録する。
 5. `draft get BATCH-ID --json`で件数、対応ID、依存関係を確認する。再送時も同じ冪等キーを使う。
 6. 承認は行わず、ローカル画面の「AI下書き」へ案内する。
@@ -77,3 +81,8 @@ PowerShell 5.1では可能な限り一時`.ps1`を作らない。必要な場合
 ### プロジェクト情報
 
 プロジェクト、別名、背景情報の追加・更新・アーカイブは、変更内容を提示して確認後に実行する。完全削除は行わない。
+
+## データ保護
+
+- 完全削除など、復元が難しい変更の直前にTask Managerの手動バックアップAPIを呼び、成功を確認する。手順は[references/commands.md](references/commands.md)の「手動バックアップ」を読む。
+- DB、バックアップ、資格情報、OAuthトークンの内容をGit、文書、移行元ファイルへ書き出さない。
