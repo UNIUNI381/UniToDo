@@ -29,6 +29,11 @@ $expectedDirectory = [System.IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 
 if ($installDirectory -ne $expectedDirectory) {
     throw "Unexpected uninstall path: $installDirectory"
 }
+
+# 削除中の再起動とログオン後の起動失敗を防ぐため監視タスクを先に解除する。 ASCII.
+$scheduledTaskName = "LocalTaskManager Watchdog"
+Stop-ScheduledTask -TaskName $scheduledTaskName -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $scheduledTaskName -Confirm:$false -ErrorAction SilentlyContinue
 Stop-InstalledTaskManager -ExecutablePath (Join-Path $installDirectory "TaskManager.exe")
 $startupShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)) "TaskManager.lnk"
 $desktopShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)) "TaskManager.lnk"

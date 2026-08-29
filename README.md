@@ -49,10 +49,10 @@ dotnet --list-sdks
 利用・改良に必要なソース、自己完結ランタイム、Codex Skillをまとめ、個人データを検査したZIPを作成します。
 
 ```powershell
-.\scripts\create-distribution.ps1
+pwsh -NoProfile -File .\scripts\create-distribution.ps1
 ```
 
-生成物は`artifacts/distribution`配下です。ワークスペースを手動でZIP化せず、必ずこのスクリプトを使用します。DB、バックアップ、資格情報、OAuthトークン、実タスク、作成者固有のCodexタスクIDは含まれません。
+PowerShell 7が必要です。生成物は`artifacts/distribution`配下です。ワークスペースを手動でZIP化せず、必ずこのスクリプトを使用します。DB、バックアップ、資格情報、OAuthトークン、実タスク、作成者固有のCodexタスクIDは含まれません。
 
 受取人はZIPを展開し、展開ルートをCodexの作業フォルダーとして開いてから、`最初にお読みください.txt`のプロンプトをCodexへ入力します。Codexが`AGENTS.md`と設計Vaultを読み、環境確認、`Install.ps1`、タスク操作、開発準備を案内します。詳細は[頒布と受取人セットアップ](docs/TaskManager-Vault/08_頒布と受取人セットアップ.md)を参照してください。
 

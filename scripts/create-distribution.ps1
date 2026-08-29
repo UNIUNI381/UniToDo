@@ -21,12 +21,22 @@ function Test-SkippedSourcePath {
     }
 
     $fileName = [System.IO.Path]::GetFileName($RelativePath)
-    $excludedFileNames = @("credentials.json", "token.json")
-    if ($excludedFileNames -contains $fileName) {
+    $excludedFileNames = @("credentials.json", "token.json", "secrets.json")
+    $isEnvironmentFile = $fileName -eq ".env" -or
+        ($fileName.StartsWith(".env.", [System.StringComparison]::OrdinalIgnoreCase) -and
+            $fileName -notin @(".env.example", ".env.template"))
+    $isLocalSettingsFile = $fileName -eq "appsettings.Local.json" -or
+        $fileName.EndsWith(".Local.json", [System.StringComparison]::OrdinalIgnoreCase)
+    if ($excludedFileNames -contains $fileName -or
+        $fileName -match '(?i)^client_secret.*\.json$' -or
+        $isEnvironmentFile -or
+        $isLocalSettingsFile) {
         return $true
     }
 
-    $excludedExtensions = @(".db", ".sqlite", ".sqlite3", ".db-wal", ".db-shm", ".bak", ".backup", ".log", ".user", ".suo")
+    $excludedExtensions = @(
+        ".db", ".sqlite", ".sqlite3", ".db-wal", ".db-shm", ".bak", ".backup", ".log", ".user", ".suo",
+        ".pfx", ".p12", ".key", ".pem")
     foreach ($excludedExtension in $excludedExtensions) {
         if ($fileName.EndsWith($excludedExtension, [System.StringComparison]::OrdinalIgnoreCase)) {
             return $true
@@ -116,9 +126,15 @@ function Assert-DistributionSafe {
 
     $forbiddenFiles = Get-ChildItem -LiteralPath $DistributionRoot -Recurse -File -Force | Where-Object {
         $fileName = $_.Name
-        $fileName -in @("credentials.json", "token.json") -or
+        $isEnvironmentFile = $fileName -eq ".env" -or
+            ($fileName.StartsWith(".env.", [System.StringComparison]::OrdinalIgnoreCase) -and
+                $fileName -notin @(".env.example", ".env.template"))
+        $fileName -in @("credentials.json", "token.json", "secrets.json") -or
         $fileName -match '(?i)^client_secret.*\.json$' -or
-        $fileName -match '(?i)\.(?:db|sqlite|sqlite3|db-wal|db-shm|bak|backup|log|user|suo)$'
+        $fileName -eq "appsettings.Local.json" -or
+        $fileName.EndsWith(".Local.json", [System.StringComparison]::OrdinalIgnoreCase) -or
+        $isEnvironmentFile -or
+        $fileName -match '(?i)\.(?:db|sqlite|sqlite3|db-wal|db-shm|bak|backup|log|user|suo|pfx|p12|key|pem)$'
     }
     if ($forbiddenFiles.Count -gt 0) {
         $forbiddenPaths = $forbiddenFiles.FullName -join [Environment]::NewLine

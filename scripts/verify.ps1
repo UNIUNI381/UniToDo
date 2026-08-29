@@ -72,9 +72,33 @@ function Assert-WatchdogInstallation {
     }
 }
 
+function Assert-WatchdogUninstallation {
+    # アンインストール時に監視タスクを停止・解除して起動失敗を残さないことを確認する。 ASCII.
+    $uninstallerPath = Join-Path $ProjectRoot "scripts\uninstall.ps1"
+    $uninstallerSource = Get-Content -LiteralPath $uninstallerPath -Raw
+    if ($uninstallerSource -notmatch 'Stop-ScheduledTask' -or
+        $uninstallerSource -notmatch 'Unregister-ScheduledTask' -or
+        $uninstallerSource -notmatch 'LocalTaskManager Watchdog') {
+        throw "The uninstaller must stop and unregister the watchdog task."
+    }
+}
+
+function Assert-DistributionSecretExclusions {
+    # 頒布検査がGit除外と同じ代表的な秘密情報ファイルを扱うことを確認する。 ASCII.
+    $distributionScriptPath = Join-Path $ProjectRoot "scripts\create-distribution.ps1"
+    $distributionScriptSource = Get-Content -LiteralPath $distributionScriptPath -Raw
+    foreach ($requiredPattern in @("secrets.json", ".env.example", ".pfx", ".pem", "appsettings.Local.json")) {
+        if ($distributionScriptSource -notmatch [regex]::Escape($requiredPattern)) {
+            throw "The distribution safety checks are missing a secret-file rule: $requiredPattern"
+        }
+    }
+}
+
 # 静的な受け入れ条件を検査する。 ASCII.
 Assert-NoForbiddenIntegration
 Assert-FrameworkAndAddress
 Assert-ApplicationIcon
 Assert-WatchdogInstallation
+Assert-WatchdogUninstallation
+Assert-DistributionSecretExclusions
 Write-Output "Static verification passed."
