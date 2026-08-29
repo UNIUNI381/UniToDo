@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#1c6b47">
+  <title>ローカルタスク管理</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css?v=20260828-05">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <button id="reload-application" class="brand-mark" type="button" aria-label="現在の画面を再読み込み" title="現在の画面を再読み込み"><img src="favicon.svg" alt=""></button>
+        <strong>Task Manager</strong>
+      </div>
+      <nav id="navigation">
+        <button class="nav-button active" data-view="dashboard">ダッシュボード</button>
+        <button class="nav-button" data-view="tasks">タスク</button>
+        <button class="nav-button" data-view="time">作業時間</button>
+        <button class="nav-button" data-view="projects">プロジェクト</button>
+        <button class="nav-button" data-view="drafts">AI下書き</button>
+        <button class="nav-button" data-view="settings">設定</button>
+        <button class="nav-button" data-view="history">履歴</button>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="service-status" class="status-dot"></span>
+        <span>ローカル接続</span>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div id="notice" class="notice hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+
+      <section id="view-dashboard" class="view active">
+        <header class="page-header">
+          <div><p class="eyebrow">NOW</p><h1>今やること</h1></div>
+          <div class="header-actions">
+            <div id="dashboard-recommendation-filter-control" class="project-filter-control dashboard-filter-control">
+              <button id="dashboard-recommendation-filter-button" class="project-filter-button" type="button" data-filter-select="dashboard-recommendation-filter" aria-haspopup="listbox" aria-expanded="false" aria-label="推薦範囲を選択">
+                <span id="dashboard-recommendation-filter-dot" class="project-filter-dot hidden"></span>
+                <span id="dashboard-recommendation-filter-label">すべて</span>
+                <span class="project-filter-chevron" aria-hidden="true"></span>
+              </button>
+              <div id="dashboard-recommendation-filter-menu" class="project-filter-menu hidden" data-filter-select="dashboard-recommendation-filter" role="listbox" aria-label="推薦範囲を選択"></div>
+              <select id="dashboard-recommendation-filter" hidden aria-hidden="true" tabindex="-1"><option value="">すべて</option></select>
+            </div>
+            <button id="open-codex-task-thread" class="primary-button" data-open-codex-task-thread>Codexでタスク管理</button>
+            <button id="refresh-dashboard" class="secondary-button">再計算</button>
+          </div>
+        </header>
+        <article id="system-incident-card" class="system-incident-card hidden" role="alert"></article>
+        <article id="recommendation-card" class="recommendation-card loading-card">読み込み中です…</article>
+        <article id="follow-up-card" class="follow-up-card hidden"></article>
+        <div id="time-review-cards" class="time-review-cards"></div>
+        <article id="calendar-widget" class="calendar-widget">
+          <div class="calendar-widget-header">
+            <div>
+              <p class="eyebrow">CALENDAR</p>
+              <h2>Google Calendar</h2>
+            </div>
+            <div class="calendar-widget-actions">
+              <button id="toggle-calendar-range" type="button" class="secondary-button">7日間を表示</button>
+              <button id="sync-calendar-dashboard" type="button" class="secondary-button">同期</button>
+              <button id="toggle-calendar-embed" type="button" class="primary-button">Google Calendarを表示</button>
+            </div>
+          </div>
+          <div id="calendar-summary" class="calendar-summary">
+            <span class="calendar-availability-chip">空き時間を確認中</span>
+          </div>
+          <div id="time-tracker-panel" class="time-tracker-panel"></div>
+          <div id="calendar-sync-alert" class="calendar-sync-alert hidden"></div>
+          <div id="calendar-timeline" class="calendar-timeline-loading">予定を読み込んでいます。</div>
+          <div id="calendar-sync-state" class="calendar-sync-state">未同期</div>
+          <div id="calendar-embed-container" class="calendar-embed-container hidden">
+            <div class="calendar-embed-toolbar">
+              <strong>Google Calendar全体</strong>
+              <a href="https://calendar.google.com/calendar/u/0/r/week" target="_blank" rel="noopener noreferrer">別タブで開く</a>
+            </div>
+            <div id="calendar-embed-frame-host"></div>
+          </div>
+        </article>
+      </section>
+
+      <section id="view-time" class="view">
+        <header class="page-header">
+          <div><p class="eyebrow">TIME</p><h1>作業時間</h1></div>
+          <button id="new-time-entry" type="button" class="primary-button">作業ログを追加</button>
+        </header>
+        <div class="time-report-toolbar">
+          <div class="segmented-control" id="time-period-selector">
+            <button type="button" data-period="day" class="active">日</button>
+            <button type="button" data-period="week">週</button>
+            <button type="button" data-period="month">月</button>
+          </div>
+          <div class="inline-actions time-navigation">
+            <button id="previous-time-period" type="button" class="secondary-button">前へ</button>
+            <button id="today-time-period" type="button" class="secondary-button">今日</button>
+            <button id="next-time-period" type="button" class="secondary-button">次へ</button>
+          </div>
+          <div id="time-project-filter-control" class="project-filter-control">
+            <button id="time-project-filter-button" class="project-filter-button" type="button" data-filter-select="time-project-filter" aria-haspopup="listbox" aria-expanded="false">
+              <span id="time-project-filter-dot" class="project-filter-dot hidden"></span>
+              <span id="time-project-filter-label">すべてのプロジェクト</span>
+              <span class="project-filter-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="time-project-filter-menu" class="project-filter-menu hidden" data-filter-select="time-project-filter" role="listbox" aria-label="プロジェクトで絞り込む"></div>
+            <select id="time-project-filter" hidden aria-hidden="true" tabindex="-1"><option value="">すべてのプロジェクト</option></select>
+          </div>
+        </div>
+        <h2 id="time-report-range" class="time-report-range"></h2>
+        <div class="time-summary-grid">
+          <article class="time-summary-card"><span>合計時間</span><strong id="time-total-duration">0分</strong></article>
+          <article class="time-summary-card"><span>要確認</span><strong id="time-review-count">0件</strong></article>
+          <article class="time-summary-card"><span>重複ログ</span><strong id="time-overlap-count">0件</strong></article>
+        </div>
+        <article class="settings-card time-chart-card">
+          <h2>プロジェクト別推移</h2>
+          <div id="time-report-chart" class="time-report-chart"></div>
+          <div id="time-report-legend" class="time-report-legend"></div>
+        </article>
+        <div class="time-report-tables">
+          <article class="settings-card">
+            <h2>プロジェクト別</h2>
+            <div class="table-wrap"><table><thead><tr><th>プロジェクト</th><th>時間</th><th>件数</th></tr></thead><tbody id="time-project-summary"></tbody></table></div>
+          </article>
+          <article class="settings-card">
+            <h2>タスク・活動別</h2>
+            <div class="table-wrap"><table><thead><tr><th>名称</th><th>プロジェクト</th><th>時間</th></tr></thead><tbody id="time-task-summary"></tbody></table></div>
+          </article>
+        </div>
+        <article class="settings-card">
+          <h2>選択期間のログ</h2>
+          <div id="time-entry-list" class="time-entry-list"></div>
+        </article>
+      </section>
+
+      <section id="view-tasks" class="view">
+        <header class="page-header">
+          <div><p class="eyebrow">TASKS</p><h1>タスク</h1></div>
+          <div class="header-actions">
+            <button id="open-codex-task-thread-tasks" class="primary-button" data-open-codex-task-thread>Codexでタスク管理</button>
+            <button id="new-task" class="primary-button">新しいタスク</button>
+          </div>
+        </header>
+        <div class="toolbar task-toolbar">
+          <input id="task-search" type="search" placeholder="名称・ID・詳細を検索">
+          <div id="task-status-filter-control" class="project-filter-control status-filter-control">
+            <button id="task-status-filter-button" class="project-filter-button" type="button" data-filter-select="task-status-filter" aria-haspopup="listbox" aria-expanded="false">
+              <span id="task-status-filter-label">すべての状態</span>
+              <span class="project-filter-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="task-status-filter-menu" class="project-filter-menu hidden" data-filter-select="task-status-filter" role="listbox" aria-label="状態で絞り込む"></div>
+            <select id="task-status-filter" hidden aria-hidden="true" tabindex="-1"><option value="">すべての状態</option></select>
+          </div>
+          <div id="task-project-filter-control" class="project-filter-control">
+            <button id="task-project-filter-button" class="project-filter-button" type="button" data-filter-select="task-project-filter" aria-haspopup="listbox" aria-expanded="false">
+              <span id="task-project-filter-dot" class="project-filter-dot hidden"></span>
+              <span id="task-project-filter-label">すべてのプロジェクト</span>
+              <span class="project-filter-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="task-project-filter-menu" class="project-filter-menu hidden" data-filter-select="task-project-filter" role="listbox" aria-label="プロジェクトで絞り込む"></div>
+            <select id="task-project-filter" hidden aria-hidden="true" tabindex="-1">
+              <option value="">すべてのプロジェクト</option>
+              <option value="category:仕事">仕事</option>
+              <option value="category:私用">私用</option>
+              <option value="__unassigned_project__">プロジェクト未設定</option>
+            </select>
+          </div>
+          <div id="task-sort-order-control" class="project-filter-control task-sort-control">
+            <button id="task-sort-order-button" class="project-filter-button" type="button" data-filter-select="task-sort-order" aria-haspopup="listbox" aria-expanded="false">
+              <span id="task-sort-order-label">優先順</span>
+              <span class="project-filter-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="task-sort-order-menu" class="project-filter-menu hidden" data-filter-select="task-sort-order" role="listbox" aria-label="並び順を選択"></div>
+            <select id="task-sort-order" hidden aria-hidden="true" tabindex="-1">
+              <option value="created">登録順</option>
+              <option value="priority" selected>優先順</option>
+            </select>
+          </div>
+          <label class="checkbox-label completed-toggle"><input id="show-completed-tasks" type="checkbox">完了・中止を表示</label>
+        </div>
+        <details id="task-dependency-panel" class="dependency-panel hidden" open></details>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th class="task-project-column">プロジェクト</th><th>名称</th><th>状態</th><th class="task-deadline-column">期限</th><th class="task-remaining-column">残時間</th><th class="task-importance-column">重要度</th><th class="task-score-column">優先度</th><th></th></tr></thead>
+            <tbody id="task-table-body"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="view-projects" class="view">
+        <header class="page-header">
+          <div><p class="eyebrow">PROJECTS</p><h1>プロジェクト</h1></div>
+          <button id="new-project" class="primary-button">新しいプロジェクト</button>
+        </header>
+        <div class="toolbar">
+          <input id="project-search" type="search" placeholder="正式名称・ID・別名を検索">
+          <label class="checkbox-label completed-toggle"><input id="show-archived-projects" type="checkbox">アーカイブ済みを表示</label>
+        </div>
+        <div id="project-list" class="project-grid"></div>
+      </section>
+
+      <section id="view-drafts" class="view">
+        <header class="page-header"><div><p class="eyebrow">AI DRAFTS</p><h1>AI下書き</h1></div></header>
+        <p class="intro">別Codexスレッドから登録した分解案です。依存関係と完了条件を確認してから承認してください。</p>
+        <div id="draft-list" class="stack-list"></div>
+      </section>
+
+      <section id="view-settings" class="view">
+        <header class="page-header"><div><p class="eyebrow">SETTINGS</p><h1>設定</h1></div></header>
+        <form id="settings-form" class="settings-layout">
+          <article class="settings-card">
+            <h2>作業時間</h2>
+            <div class="form-grid">
+              <label>活動開始<input name="activityStart" type="time" required></label>
+              <label>活動終了<input name="activityEnd" type="time" required></label>
+              <label>最小作業時間<input name="minimumWorkMinutes" type="number" min="1" required></label>
+              <label>最大作業時間<input name="maximumWorkMinutes" type="number" min="1" required></label>
+              <label>予備時間率<input name="bufferRatio" type="number" min="0" max="1" step="0.01" required></label>
+              <label>既定延期時間<input name="defaultPostponeMinutes" type="number" min="1" required></label>
+              <label>現在環境<input name="currentContext" type="text" required></label>
+              <label>朝通知時刻<input name="morningHour" type="number" min="0" max="23" required></label>
+              <label>長時間タイマー警告（分）<input name="longTimerWarningMinutes" type="number" min="15" max="1440" required></label>
+            </div>
+          </article>
+          <article class="settings-card">
+            <h2>優先度係数</h2>
+            <div class="form-grid">
+              <label>期限リスク<input name="deadlineWeight" type="number" min="0" max="1" step="0.01"></label>
+              <label>重要度<input name="importanceWeight" type="number" min="0" max="1" step="0.01"></label>
+              <label>解放度<input name="unblockWeight" type="number" min="0" max="1" step="0.01"></label>
+              <label>延期回数<input name="deferralWeight" type="number" min="0" max="1" step="0.01"></label>
+              <label>継続性<input name="continuityWeight" type="number" min="0" max="1" step="0.01"></label>
+              <label>開始後経過<input name="agingWeight" type="number" min="0" max="1" step="0.01"></label>
+            </div>
+            <small class="field-help">各係数は相対値として自動的に正規化されます。「開始後経過」を0にすると経過加算を無効にできます。</small>
+          </article>
+          <article class="settings-card">
+            <h2>Codex音声入力</h2>
+            <label>
+              送信先タスクIDまたはディープリンク
+              <input name="codexThreadIdentifier" type="text" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+              <small class="field-help">ご自身のCodexタスクのUUIDまたはcodex://threads/&lt;UUID&gt;を指定します。未設定時は音声送信せず、設定案内を表示します。</small>
+            </label>
+          </article>
+          <article class="settings-card">
+            <h2>Google Calendar</h2>
+            <label>対象カレンダーID<input name="calendarIdentifiers" type="text" placeholder="primary"></label>
+            <label>
+              Google Calendar埋め込みURL
+              <input name="calendarEmbedUrl" type="url" placeholder="https://calendar.google.com/calendar/embed?src=...">
+              <small class="field-help">Google Calendarの「カレンダーの統合」で生成した埋め込みURLのsrc値を貼り付けます。</small>
+            </label>
+            <div class="form-grid compact-grid">
+              <label>取得日数<input name="calendarLookaheadDays" type="number" min="1"></label>
+              <label>予定前後余白<input name="calendarBufferMinutes" type="number" min="0"></label>
+              <label>14日以降の日次容量<input name="futureDailyCapacityMinutes" type="number" min="0"></label>
+              <label class="checkbox-label"><input name="treatAllDayAsBusy" type="checkbox">終日予定も時間を塞ぐ</label>
+              <label class="checkbox-label"><input name="notificationsEnabled" type="checkbox">PC通知を有効にする</label>
+            </div>
+            <div class="inline-actions">
+              <label class="file-button">credentials.jsonを選択<input id="calendar-credentials" type="file" accept="application/json,.json"></label>
+              <button id="connect-calendar" type="button" class="secondary-button">Googleへ接続</button>
+              <button id="sync-calendar" type="button" class="secondary-button">予定を同期</button>
+            </div>
+          </article>
+          <button type="submit" class="primary-button save-button">設定を保存</button>
+        </form>
+      </section>
+
+      <section id="view-history" class="view">
+        <header class="page-header"><div><p class="eyebrow">HISTORY</p><h1>履歴</h1></div></header>
+        <div class="history-toolbar">
+          <label class="checkbox-label"><input id="show-calendar-history" type="checkbox">カレンダー同期ログを表示</label>
+          <label class="checkbox-label"><input id="show-time-history" type="checkbox">作業ログを表示</label>
+        </div>
+        <div id="history-list" class="timeline"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <dialog id="task-dialog">
+    <form id="task-form" method="dialog">
+      <div class="dialog-header"><h2 id="task-dialog-title">タスクを追加</h2><button type="button" id="close-task-dialog" class="icon-button">×</button></div>
+      <input name="identifier" type="hidden">
+      <div class="form-grid">
+        <label class="wide-field">名称<input name="title" type="text" required maxlength="200"></label>
+        <label>プロジェクト<select name="projectIdentifier"><option value="">なし</option></select></label>
+        <label>区分<select name="category"><option>仕事</option><option>私用</option></select></label>
+        <label>状態<select name="status"></select></label>
+        <label>期限<input name="deadlineAt" type="datetime-local"></label>
+        <label>期限種別<select name="deadlineType"><option>厳守</option><option>目安</option><option>なし</option></select></label>
+        <label>期限の設定方法<select name="deadlineOrigin"><option value="auto">未指定時はプロジェクト既定</option><option value="project-default">プロジェクト既定で設定済み</option><option value="explicit">個別指定</option><option value="none">期限なし</option></select></label>
+        <label>見積時間（分）<input name="estimatedMinutes" type="number" min="1" value="30" required></label>
+        <label>残時間（分）<input name="remainingMinutes" type="number" min="0" value="30" required></label>
+        <label>重要度<select name="importance"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
+        <label>開始可能日時<input name="earliestStartAt" type="datetime-local"></label>
+        <label>親タスクID<input name="parentIdentifier" type="text"></label>
+        <label class="wide-field">依存タスクID（カンマ区切り）<input name="dependencyIdentifiers" type="text"></label>
+        <label>必要環境<input name="requiredContext" type="text" value="PC"></label>
+        <label class="checkbox-label"><input name="splittable" type="checkbox" checked>分割可能</label>
+        <label class="wide-field">完了条件<input name="completionCondition" type="text"></label>
+        <label class="wide-field">詳細<textarea name="details" rows="4"></textarea></label>
+      </div>
+      <div class="dialog-actions"><button type="button" id="cancel-task-dialog" class="secondary-button">キャンセル</button><button type="submit" class="primary-button">保存</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="project-dialog">
+    <form id="project-form" method="dialog">
+      <div class="dialog-header"><h2 id="project-dialog-title">プロジェクトを追加</h2><button type="button" id="close-project-dialog" class="icon-button">×</button></div>
+      <input name="identifier" type="hidden">
+      <div class="form-grid">
+        <label class="wide-field">正式名称<input name="canonicalName" type="text" required maxlength="200"></label>
+        <label>状態<select name="status"><option>有効</option><option>アーカイブ</option></select></label>
+      </div>
+      <article class="embedded-card project-color-editor">
+        <div class="embedded-header"><h3>表示色（HSV）</h3><button id="randomize-project-color" type="button" class="secondary-button">色相をランダム化</button></div>
+        <div class="project-color-layout">
+          <div id="project-color-preview" class="project-color-preview" aria-label="プロジェクト色のプレビュー"></div>
+          <div class="project-color-controls">
+            <label>H 色相 <output id="project-color-hue-output">0</output><input name="colorHue" type="range" min="0" max="359" step="1" value="0"></label>
+            <label>S 彩度 <output id="project-color-saturation-output">50</output><input name="colorSaturation" type="range" min="0" max="100" step="1" value="50"></label>
+            <label>V 明度 <output id="project-color-value-output">78</output><input name="colorValue" type="range" min="0" max="100" step="1" value="78"></label>
+          </div>
+        </div>
+        <small class="field-help">新規作成時は淡い彩度・明度を保ったまま色相を自動選択します。</small>
+      </article>
+      <article class="embedded-card">
+        <h3>毎週の既定期限</h3>
+        <div class="form-grid">
+          <label class="checkbox-label"><input name="deadlineEnabled" type="checkbox">新規タスクへ適用</label>
+          <label>曜日<select name="deadlineWeekday"><option value="1">月曜日</option><option value="2">火曜日</option><option value="3">水曜日</option><option value="4">木曜日</option><option value="5">金曜日</option><option value="6">土曜日</option><option value="7">日曜日</option></select></label>
+          <label>時刻<input name="deadlineLocalTime" type="time" value="17:00"></label>
+          <label>期限種別<select name="deadlineType"><option>目安</option><option>厳守</option></select></label>
+        </div>
+      </article>
+      <section id="project-related-editor" class="hidden">
+        <article class="embedded-card">
+          <div class="embedded-header"><h3>表記ゆれ・別名</h3></div>
+          <div id="project-alias-list" class="chip-list"></div>
+          <div class="inline-actions"><input id="project-alias-input" type="text" placeholder="確認済みの別名"><button id="add-project-alias" type="button" class="secondary-button">別名を追加</button></div>
+        </article>
+        <article class="embedded-card">
+          <div class="embedded-header"><h3>背景情報</h3><button id="new-project-context" type="button" class="secondary-button">背景情報を追加</button></div>
+          <div id="project-context-list" class="stack-list"></div>
+        </article>
+        <article class="embedded-card">
+          <div class="embedded-header"><h3>Codexへ渡す内容</h3><button id="preview-project-context" type="button" class="secondary-button">プレビュー更新</button></div>
+          <pre id="project-context-preview" class="context-preview">プレビュー更新を押してください。</pre>
+        </article>
+      </section>
+      <div class="dialog-actions"><button type="button" id="archive-project" class="danger-button hidden">アーカイブ</button><button type="button" id="cancel-project-dialog" class="secondary-button">キャンセル</button><button type="submit" class="primary-button">保存</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="project-context-dialog">
+    <form id="project-context-form" method="dialog">
+      <div class="dialog-header"><h2 id="project-context-dialog-title">背景情報を追加</h2><button type="button" id="close-project-context-dialog" class="icon-button">×</button></div>
+      <input name="identifier" type="hidden">
+      <input name="projectIdentifier" type="hidden">
+      <div class="form-grid">
+        <label class="wide-field">題名<input name="title" type="text" required maxlength="200"></label>
+        <label>優先度<select name="priority"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option></select></label>
+        <label class="checkbox-label"><input name="enabled" type="checkbox" checked>有効</label>
+        <label>有効開始<input name="validFrom" type="datetime-local"></label>
+        <label>有効終了<input name="validUntil" type="datetime-local"></label>
+        <label class="wide-field">背景情報（Markdown）<textarea name="contentMarkdown" rows="12" required></textarea></label>
+      </div>
+      <div class="dialog-actions"><button type="button" id="cancel-project-context-dialog" class="secondary-button">キャンセル</button><button type="submit" class="primary-button">保存</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="free-activity-dialog">
+    <form id="free-activity-form" method="dialog">
+      <div class="dialog-header"><h2>自由活動を開始</h2><button type="button" id="close-free-activity-dialog" class="icon-button">×</button></div>
+      <div class="form-grid">
+        <label class="wide-field">活動名<input name="title" type="text" required maxlength="200" placeholder="メール整理、資料調査など"></label>
+        <div class="wide-field form-field">
+          <span>プロジェクト</span>
+          <div id="free-activity-project-control" class="project-filter-control">
+            <button id="free-activity-project-button" class="project-filter-button" type="button" data-filter-select="free-activity-project" aria-haspopup="listbox" aria-expanded="false">
+              <span id="free-activity-project-dot" class="project-filter-dot"></span>
+              <span id="free-activity-project-label">未割当</span>
+              <span class="project-filter-chevron" aria-hidden="true"></span>
+            </button>
+            <div id="free-activity-project-menu" class="project-filter-menu hidden" data-filter-select="free-activity-project" role="listbox" aria-label="プロジェクトを選択"></div>
+            <select id="free-activity-project" name="projectIdentifier" hidden aria-hidden="true" tabindex="-1"><option value="">未割当</option></select>
+          </div>
+        </div>
+      </div>
+      <p class="field-help">実行中のタスクまたは自由活動がある場合は自動的に中断・終了します。</p>
+      <div class="dialog-actions"><button type="button" id="cancel-free-activity-dialog" class="secondary-button">キャンセル</button><button type="submit" class="primary-button">計測を開始</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="time-entry-dialog">
+    <form id="time-entry-form" method="dialog">
+      <div class="dialog-header"><h2 id="time-entry-dialog-title">作業ログを追加</h2><button type="button" id="close-time-entry-dialog" class="icon-button">×</button></div>
+      <input name="identifier" type="hidden">
+      <div class="form-grid">
+        <label class="wide-field">名称<input name="title" type="text" required maxlength="200"></label>
+        <label>タスク<select name="taskIdentifier"><option value="">自由活動</option></select></label>
+        <label>プロジェクト<select name="projectIdentifier"><option value="">未割当</option></select></label>
+        <label>開始日時<input name="startAt" type="datetime-local" required></label>
+        <label>終了日時<input name="endAt" type="datetime-local" required></label>
+      </div>
+      <div id="time-entry-review-note" class="time-entry-review-note hidden"></div>
+      <div class="dialog-actions">
+        <button type="button" id="void-time-entry" class="danger-button hidden">無効化</button>
+        <button type="button" id="cancel-time-entry-dialog" class="secondary-button">キャンセル</button>
+        <button type="submit" class="primary-button">保存</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js?v=20260828-05" defer></script>
+</body>
+</html>

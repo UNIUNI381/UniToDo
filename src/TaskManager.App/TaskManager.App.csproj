@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>TaskManager</AssemblyName>
+    <RootNamespace>TaskManager</RootNamespace>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ApplicationIcon>Assets\TaskManager.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Google.Apis.Calendar.v3" Version="1.*" />
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.*" />
+    <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="2.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

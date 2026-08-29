@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <RestorePackagesWithLockFile>false</RestorePackagesWithLockFile>
+    <TypeWhisperSdkPath Condition="'$(TypeWhisperSdkPath)' == ''">$(LOCALAPPDATA)\TypeWhisper\current\TypeWhisper.PluginSDK.dll</TypeWhisperSdkPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="TypeWhisper.PluginSDK">
+      <HintPath>$(TypeWhisperSdkPath)</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

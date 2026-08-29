@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>TaskManager.Tests</AssemblyName>
+    <RootNamespace>TaskManager.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TaskManager.App\TaskManager.App.csproj" />
+  </ItemGroup>
+</Project>

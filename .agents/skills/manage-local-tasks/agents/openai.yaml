@@ -1,0 +1,4 @@
+interface:
+  display_name: "ローカルタスク管理"
+  short_description: "このリポジトリからローカルタスクを安全に操作します"
+  default_prompt: "$manage-local-tasksを使って、今やるべきタスクを1件だけ表示してください。"

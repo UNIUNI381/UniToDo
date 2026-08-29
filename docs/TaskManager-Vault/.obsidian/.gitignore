@@ -1,0 +1,7 @@
+workspace*.json
+cache/
+plugins/
+community-plugins.json
+hotkeys.json
+appearance.json
+core-plugins.json
