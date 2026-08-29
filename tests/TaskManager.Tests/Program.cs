@@ -970,7 +970,7 @@ public static class Program
         Assert(!statusLabel.AutoEllipsis, "音声状態文が省略記号付きの表示になっています。");
         Assert(statusLabel.Height >= measuredTextSize.Height, "長い状態文の全行を表示できる高さがありません。");
         Assert(workingArea.Contains(statusForm.Bounds), "音声状態表示が作業領域からはみ出しました。");
-        Assert(workingArea.Bottom - statusForm.Bottom >= 120, "音声状態表示がTypeWhisper表示を避ける高さへ移動していません。");
+        Assert(workingArea.Bottom - statusForm.Bottom >= 84, "音声状態表示がTypeWhisper表示を避ける高さへ移動していません。");
         return Task.CompletedTask;
     }
 

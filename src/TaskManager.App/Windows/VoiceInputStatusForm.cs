@@ -13,7 +13,7 @@ public sealed class VoiceInputStatusForm : Form
     private const int CompactMinimumStatusHeight = 30;
     private const int CompactHorizontalPadding = 36;
     private const int CompactScreenMargin = 24;
-    private const int BottomMargin = 120;
+    private const int BottomMargin = 84;
     private const int MaximumDetailWidth = 684;
     private const int MaximumDetailHeight = 180;
 
