@@ -58,6 +58,8 @@ public static class Program
         await RunTestAsync("Codex CLI成功時の応答を詳細画面へ渡す", TestCodexSubmissionResponseDisplayAsync);
         await RunTestAsync("F13起動時にOllamaとTypeWhisperを必要時だけ起動する", TestVoiceInputDependencyStartupAsync);
         await RunTestAsync("起動済み音声入力環境を再利用する", TestVoiceInputDependencyReuseAsync);
+        await RunTestAsync("開始API待機中の2回目のF13で録音を停止する", TestVoiceInputSecondPressDuringStartAsync);
+        await RunTestAsync("TypeWhisper側の停止後は次回F13で再開する", TestVoiceInputExternalStopRecoveryAsync);
         await RunTestAsync("録音中の2回目のF13でAPI停止を確認する", TestVoiceInputSecondPressStopsAsync);
         await RunTestAsync("TypeWhisper停止確認前に校正待ちを表示しない", TestVoiceInputStopAcknowledgementAsync);
         await RunTestAsync("TypeWhisper停止失敗時に録音状態を維持する", TestVoiceInputStopFailureAsync);
@@ -1140,6 +1142,68 @@ public static class Program
         Assert(voiceInputRuntime.TypeWhisperStartCount == 0, "起動済みTypeWhisperが重複起動されました。");
         Assert(voiceInputRuntime.ModelLoadCount == 1, "起動済み環境で校正モデルが事前ロードされませんでした。");
         Assert(voiceInputRuntime.RecognitionStartCount == 1, "起動済みTypeWhisperでAPI録音が開始されませんでした。");
+    }
+
+    /// <summary>開始APIの応答待ち中でも実録音開始を表示し、2回目のF13で停止できることを検証する。</summary>
+    private static async Task TestVoiceInputSecondPressDuringStartAsync()
+    {
+        // TypeWhisper本体を録音中にしたまま開始API応答だけを保留し、実際の起動遅延を再現する。
+        TaskCompletionSource startCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        RecordingVoiceInputRuntime voiceInputRuntime = new()
+        {
+            OllamaReady = true,
+            OllamaRunning = true,
+            TypeWhisperRunning = true,
+            RecognitionStartCompletion = startCompletion
+        };
+        VoiceInputCoordinator coordinator = CreateVoiceInputCoordinator(voiceInputRuntime);
+        List<VoiceInputStatus> statuses = [];
+        coordinator.StatusChanged += statuses.Add;
+
+        Task startingTask = coordinator.StartAsync(CancellationToken.None);
+        for (int attemptIndex = 0;
+            attemptIndex < 100 && statuses.All(status => status.Message != "音声認識を開始しました");
+            attemptIndex += 1)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert(!startingTask.IsCompleted, "開始API応答を保留した録音開始処理が完了しました。");
+        Assert(
+            statuses.Any(status => status.Message == "音声認識を開始しました"),
+            "開始API応答前の実録音状態で開始表示へ切り替わりませんでした。");
+        await coordinator.StartAsync(CancellationToken.None);
+        await startingTask;
+
+        Assert(voiceInputRuntime.RecognitionStartCount == 1, "開始途中の停止で録音が二重開始されました。");
+        Assert(voiceInputRuntime.RecognitionStopCount == 1, "開始API待機中の2回目のF13で停止されませんでした。");
+        Assert(!voiceInputRuntime.TypeWhisperRecording, "開始API待機中の停止後もTypeWhisperが録音中です。");
+        Assert(
+            statuses.LastOrDefault()?.Message == "音声認識を停止しました。文字起こしと校正を待っています…",
+            "開始API待機中の停止後に校正待ち表示へ進みませんでした。");
+    }
+
+    /// <summary>TypeWhisper側で録音を停止した後のF13が新規開始になることを検証する。</summary>
+    private static async Task TestVoiceInputExternalStopRecoveryAsync()
+    {
+        // Esc停止を偽の実録音状態へ反映し、内部フラグよりAPI状態が優先されることを確認する。
+        RecordingVoiceInputRuntime voiceInputRuntime = new()
+        {
+            OllamaReady = true,
+            OllamaRunning = true,
+            TypeWhisperRunning = true
+        };
+        VoiceInputCoordinator coordinator = CreateVoiceInputCoordinator(voiceInputRuntime);
+        List<VoiceInputStatus> statuses = [];
+        coordinator.StatusChanged += statuses.Add;
+
+        await coordinator.StartAsync(CancellationToken.None);
+        voiceInputRuntime.TypeWhisperRecording = false;
+        await coordinator.StartAsync(CancellationToken.None);
+
+        Assert(voiceInputRuntime.RecognitionStartCount == 2, "TypeWhisper側の停止後に録音を再開できませんでした。");
+        Assert(voiceInputRuntime.RecognitionStopCount == 0, "停止済みTypeWhisperへ不要な停止要求が送られました。");
+        Assert(statuses.LastOrDefault()?.Kind == VoiceInputStatusKind.Success, "Esc停止後の再開が成功表示になりませんでした。");
     }
 
     /// <summary>録音中の2回目のF13が新規開始せずAPIで録音を停止することを検証する。</summary>
@@ -2508,8 +2572,9 @@ public static class Program
         public int RecognitionStartCount { get; private set; }
         public int RecognitionStopCount { get; private set; }
         public List<string> Operations { get; } = [];
-        // モデルロードと録音停止をテスト側の任意時点まで保留する合図を保持する。
+        // モデルロード、録音開始、録音停止をテスト側の任意時点まで保留する合図を保持する。
         public TaskCompletionSource? ModelLoadCompletion { get; init; }
+        public TaskCompletionSource? RecognitionStartCompletion { get; init; }
         public TaskCompletionSource? RecognitionStopCompletion { get; init; }
         // 録音停止時に返す任意の障害を保持する。
         public Exception? RecognitionStopError { get; init; }
@@ -2585,13 +2650,16 @@ public static class Program
         }
 
         /// <summary>TypeWhisperの音声校正録音開始を記録する。</summary>
-        public Task StartTypeWhisperRecognitionAsync(CancellationToken cancellationToken)
+        public async Task StartTypeWhisperRecognitionAsync(CancellationToken cancellationToken)
         {
-            // 実APIを呼ばず開始回数と録音状態だけを更新する。
+            // 実APIを呼ばず開始回数と録音状態を更新し、必要時は応答完了だけを保留する。
             RecognitionStartCount += 1;
             TypeWhisperRecording = true;
             Operations.Add("start-recognition");
-            return Task.CompletedTask;
+            if (RecognitionStartCompletion is not null)
+            {
+                await RecognitionStartCompletion.Task.WaitAsync(cancellationToken);
+            }
         }
 
         /// <summary>設定されたTypeWhisper録音状態を返す。</summary>
