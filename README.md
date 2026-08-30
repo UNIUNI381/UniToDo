@@ -34,7 +34,7 @@ winget install Microsoft.DotNet.SDK.10
 dotnet --list-sdks
 ```
 
-この作業環境ではWinGetが利用できなかったため、公式`dotnet-install`でワークスペース内の`.dotnet`へSDK 10.0.302を導入しています。各スクリプトはローカルSDKを優先し、なければPATH上の.NET 10を使います。
+各スクリプトはワークスペース内の`.dotnet`を優先し、なければPATH上の.NET 10を使います。ビルドとテストはWindows PowerShell 5.1とPowerShell 7のどちらでも実行できます。
 
 ```powershell
 .\scripts\build.ps1

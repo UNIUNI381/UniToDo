@@ -1,5 +1,20 @@
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
+﻿$ProjectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "common.ps1")
+
+function Assert-WindowsPowerShellCompatibility {
+    # 日本語を含む静的検査スクリプトがWindows PowerShell 5.1でも正しく解釈されることを確認する。 ASCII.
+    $verificationScriptPath = Join-Path $PSScriptRoot "verify.ps1"
+    $scriptBytes = [System.IO.File]::ReadAllBytes($verificationScriptPath)
+
+    # UTF-8 BOMの3バイトが保持されていることを検査する。
+    $hasUtf8Bom = $scriptBytes.Length -ge 3 -and
+        $scriptBytes[0] -eq 0xEF -and
+        $scriptBytes[1] -eq 0xBB -and
+        $scriptBytes[2] -eq 0xBF
+    if (-not $hasUtf8Bom) {
+        throw "scripts/verify.ps1 must retain its UTF-8 BOM for Windows PowerShell 5.1 compatibility."
+    }
+}
 
 function Assert-NoForbiddenIntegration {
     # 実行コードへOpenAI API、Apps Script、Google Sheets同期が混入していないことを確認する。 ASCII.
@@ -27,9 +42,9 @@ function Assert-NoForbiddenIntegration {
 
 function Assert-FrameworkAndAddress {
     # .NET 10への統一とloopback限定アドレスを確認する。 ASCII.
-    $buildProperties = Get-Content -LiteralPath (Join-Path $ProjectRoot "Directory.Build.props") -Raw
-    $globalSettings = Get-Content -LiteralPath (Join-Path $ProjectRoot "global.json") -Raw | ConvertFrom-Json
-    $taskConstants = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\Domain\TaskConstants.cs") -Raw
+    $buildProperties = Get-Content -LiteralPath (Join-Path $ProjectRoot "Directory.Build.props") -Raw -Encoding UTF8
+    $globalSettings = Get-Content -LiteralPath (Join-Path $ProjectRoot "global.json") -Raw -Encoding UTF8 | ConvertFrom-Json
+    $taskConstants = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\Domain\TaskConstants.cs") -Raw -Encoding UTF8
     if ($buildProperties -notmatch '<TargetFramework>net10\.0-windows</TargetFramework>') {
         throw "The target framework must be net10.0-windows."
     }
@@ -45,7 +60,7 @@ function Assert-ApplicationIcon {
     # 実行ファイルとスタートアップショートカットで共通利用するアイコン設定を検査する。 ASCII.
     $applicationProjectPath = Join-Path $ProjectRoot "src\TaskManager.App\TaskManager.App.csproj"
     $applicationIconPath = Join-Path $ProjectRoot "src\TaskManager.App\Assets\TaskManager.ico"
-    $applicationProject = Get-Content -LiteralPath $applicationProjectPath -Raw
+    $applicationProject = Get-Content -LiteralPath $applicationProjectPath -Raw -Encoding UTF8
     if ($applicationProject -notmatch '<ApplicationIcon>Assets\\TaskManager\.ico</ApplicationIcon>') {
         throw "The Task Manager application icon must be embedded into the executable."
     }
@@ -60,7 +75,7 @@ function Assert-WatchdogInstallation {
         (Join-Path $ProjectRoot "Install.ps1"),
         (Join-Path $ProjectRoot "scripts\install.ps1"))
     foreach ($installerPath in $installerPaths) {
-        $installerSource = Get-Content -LiteralPath $installerPath -Raw
+        $installerSource = Get-Content -LiteralPath $installerPath -Raw -Encoding UTF8
         if ($installerSource -notmatch 'Register-ScheduledTask' -or
             $installerSource -notmatch 'Start-ScheduledTask' -or
             $installerSource -notmatch '%LOCALAPPDATA%') {
@@ -69,7 +84,7 @@ function Assert-WatchdogInstallation {
     }
 
     # taskctlの自動起動も登録済み監視タスクを優先することを確認する。 ASCII.
-    $commandLineSource = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\Cli\CliRunner.cs") -Raw
+    $commandLineSource = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\Cli\CliRunner.cs") -Raw -Encoding UTF8
     if ($commandLineSource -notmatch 'schtasks\.exe' -or
         $commandLineSource -notmatch 'WatchdogScheduledTaskName') {
         throw "taskctl must start the registered watchdog task before using its fallback."
@@ -79,7 +94,7 @@ function Assert-WatchdogInstallation {
 function Assert-WatchdogUninstallation {
     # アンインストール時に監視タスクを停止・解除して起動失敗を残さないことを確認する。 ASCII.
     $uninstallerPath = Join-Path $ProjectRoot "scripts\uninstall.ps1"
-    $uninstallerSource = Get-Content -LiteralPath $uninstallerPath -Raw
+    $uninstallerSource = Get-Content -LiteralPath $uninstallerPath -Raw -Encoding UTF8
     if ($uninstallerSource -notmatch 'Stop-ScheduledTask' -or
         $uninstallerSource -notmatch 'Unregister-ScheduledTask' -or
         $uninstallerSource -notmatch 'LocalTaskManager Watchdog') {
@@ -90,7 +105,7 @@ function Assert-WatchdogUninstallation {
 function Assert-DistributionSecretExclusions {
     # 頒布検査がGit除外と同じ代表的な秘密情報ファイルを扱うことを確認する。 ASCII.
     $distributionScriptPath = Join-Path $ProjectRoot "scripts\create-distribution.ps1"
-    $distributionScriptSource = Get-Content -LiteralPath $distributionScriptPath -Raw
+    $distributionScriptSource = Get-Content -LiteralPath $distributionScriptPath -Raw -Encoding UTF8
     foreach ($requiredPattern in @("secrets.json", ".env.example", ".pfx", ".pem", "appsettings.Local.json")) {
         if ($distributionScriptSource -notmatch [regex]::Escape($requiredPattern)) {
             throw "The distribution safety checks are missing a secret-file rule: $requiredPattern"
@@ -115,12 +130,12 @@ function Assert-LicenseInventory {
         }
     }
 
-    $projectLicense = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "LICENSE")
+    $projectLicense = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "LICENSE") -Encoding UTF8
     if ($projectLicense -notmatch 'Copyright \(c\) 2026 uniuni \(https://x\.com/lept_on\)') {
         throw "The project MIT license must contain the approved copyright holder."
     }
 
-    $thirdPartyNotice = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "THIRD-PARTY-NOTICES.md")
+    $thirdPartyNotice = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "THIRD-PARTY-NOTICES.md") -Encoding UTF8
     foreach ($projectAsset in @("TaskManager.ico", "favicon.svg")) {
         if ($thirdPartyNotice -notmatch [regex]::Escape($projectAsset)) {
             throw "The original project asset is missing from the license notice: $projectAsset"
@@ -132,7 +147,7 @@ function Assert-LicenseInventory {
         }
     }
 
-    $dependencyManifest = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "licenses\dependencies.json") | ConvertFrom-Json
+    $dependencyManifest = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "licenses\dependencies.json") -Encoding UTF8 | ConvertFrom-Json
     $manifestPackageDependencies = @(
         $dependencyManifest.components |
             Where-Object { $_.name -notlike "runtimepack.*" } |
@@ -153,7 +168,7 @@ function Assert-LicenseInventory {
     )
     $lockedPackageDependencies = @(
         foreach ($lockFilePath in $lockFilePaths) {
-            $lockData = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot $lockFilePath) | ConvertFrom-Json
+            $lockData = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot $lockFilePath) -Encoding UTF8 | ConvertFrom-Json
             foreach ($frameworkProperty in $lockData.dependencies.PSObject.Properties) {
                 $frameworkProperty.Value.PSObject.Properties |
                     Where-Object { $_.Value.type -ne "Project" } |
@@ -180,7 +195,7 @@ function Assert-LicenseInventory {
         throw "The runtime pack license inventory must use .NET 10.0.11 or later."
     }
 
-    $distributionScript = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\create-distribution.ps1")
+    $distributionScript = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\create-distribution.ps1") -Encoding UTF8
     foreach ($requiredPattern in @(
         "Assert-PublishedDependenciesCovered",
         "Assert-PackageLegalFilesIncluded",
@@ -193,14 +208,14 @@ function Assert-LicenseInventory {
         }
     }
 
-    $publishScript = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\publish.ps1")
+    $publishScript = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\publish.ps1") -Encoding UTF8
     foreach ($requiredPattern in @("Copy-PackageLegalFiles", "Microsoft.NETCore.App.Runtime.win-x64", "Microsoft.AspNetCore.App.Runtime.win-x64", "System.Management")) {
         if ($publishScript -notmatch [regex]::Escape($requiredPattern)) {
             throw "The publish script is missing a package-provided notice rule: $requiredPattern"
         }
     }
 
-    $distributionInstaller = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "Install.ps1")
+    $distributionInstaller = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "Install.ps1") -Encoding UTF8
     foreach ($requiredPattern in @("MIT License - uniuni (https://x.com/lept_on)", "THIRD-PARTY-NOTICES.md", "Microsoft-DotNet-Library-License.txt", "package-legal-files.json")) {
         if ($distributionInstaller -notmatch [regex]::Escape($requiredPattern)) {
             throw "The distribution installer is missing a license display rule: $requiredPattern"
@@ -209,6 +224,7 @@ function Assert-LicenseInventory {
 }
 
 # 静的な受け入れ条件を検査する。 ASCII.
+Assert-WindowsPowerShellCompatibility
 Assert-NoForbiddenIntegration
 Assert-FrameworkAndAddress
 Assert-ApplicationIcon
