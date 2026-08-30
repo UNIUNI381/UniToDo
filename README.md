@@ -27,7 +27,7 @@ Copyright (c) 2026 uniuni ([https://x.com/lept_on](https://x.com/lept_on))
 
 ## 開発環境の準備
 
-Windows 10または11で、Microsoft公式の.NET 10 SDKを導入します。
+Windows 10または11で、Microsoft公式の.NET 10 SDK `10.0.303`以降を導入します。
 
 ```powershell
 winget install Microsoft.DotNet.SDK.10

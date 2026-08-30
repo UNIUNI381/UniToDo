@@ -10,12 +10,16 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
 function Test-SkippedSourcePath {
     # allowlist内でもビルド生成物やローカル専用ディレクトリなら除外する。
-    param([Parameter(Mandatory = $true)][string]$RelativePath)
+    param(
+        [Parameter(Mandatory = $true)][string]$RelativePath,
+        [switch]$AllowLicensePackages
+    )
 
     $excludedSegments = @(".git", ".codex", ".dotnet", ".vs", "artifacts", "bin", "obj", "TestResults", "node_modules", "packages")
     $pathSegments = @($RelativePath -split '[\\/]')
+    $isPackageLegalPath = $AllowLicensePackages -and $RelativePath -match '(?i)^licenses[\\/]packages[\\/]'
     foreach ($pathSegment in $pathSegments) {
-        if ($excludedSegments -contains $pathSegment) {
+        if ($excludedSegments -contains $pathSegment -and -not ($pathSegment -eq "packages" -and $isPackageLegalPath)) {
             return $true
         }
     }
@@ -66,7 +70,8 @@ function Copy-AllowedDirectory {
     # allowlistで指定されたディレクトリからローカル生成物を除いてコピーする。
     param(
         [Parameter(Mandatory = $true)][string]$SourceDirectory,
-        [Parameter(Mandatory = $true)][string]$DestinationDirectory
+        [Parameter(Mandatory = $true)][string]$DestinationDirectory,
+        [switch]$AllowLicensePackages
     )
 
     if (-not (Test-Path -LiteralPath $SourceDirectory -PathType Container)) {
@@ -80,7 +85,7 @@ function Copy-AllowedDirectory {
         }
 
         $relativePath = [System.IO.Path]::GetRelativePath($SourceDirectory, $sourceFile.FullName)
-        if (Test-SkippedSourcePath -RelativePath $relativePath) {
+        if (Test-SkippedSourcePath -RelativePath $relativePath -AllowLicensePackages:$AllowLicensePackages) {
             continue
         }
 
@@ -139,13 +144,56 @@ function Assert-PublishedDependenciesCovered {
     }
 }
 
+function Assert-PackageLegalFilesIncluded {
+    # 発行時に収集したパッケージ付属ライセンスと通知が頒布物内で改変されていないことを検証する。
+    param(
+        [Parameter(Mandatory = $true)][string]$DistributionRoot,
+        [Parameter(Mandatory = $true)][string]$RuntimeLicenseDirectory
+    )
+
+    $rootLicenseDirectory = Join-Path $DistributionRoot "licenses"
+    $runtimeIndexPath = Join-Path $RuntimeLicenseDirectory "package-legal-files.json"
+    $rootIndexPath = Join-Path $rootLicenseDirectory "package-legal-files.json"
+    foreach ($requiredIndexPath in @($runtimeIndexPath, $rootIndexPath)) {
+        if (-not (Test-Path -LiteralPath $requiredIndexPath -PathType Leaf)) {
+            throw "パッケージ付属通知の索引がありません: $requiredIndexPath"
+        }
+    }
+
+    $legalFileIndex = Get-Content -Raw -LiteralPath $runtimeIndexPath | ConvertFrom-Json
+    foreach ($component in @($legalFileIndex.components)) {
+        foreach ($legalFile in @($component.files)) {
+            $relativeLegalPath = Join-Path (Join-Path (Join-Path "packages" $component.packageIdentifier) $component.version) $legalFile.relativePath
+            foreach ($licenseDirectory in @($RuntimeLicenseDirectory, $rootLicenseDirectory)) {
+                $legalFilePath = Join-Path $licenseDirectory $relativeLegalPath
+                if (-not (Test-Path -LiteralPath $legalFilePath -PathType Leaf)) {
+                    throw "パッケージ付属ライセンスまたは通知がありません: $legalFilePath"
+                }
+
+                $actualHash = (Get-FileHash -LiteralPath $legalFilePath -Algorithm SHA256).Hash
+                if ($actualHash -ne $legalFile.sha256) {
+                    throw "パッケージ付属ライセンスまたは通知のハッシュが一致しません: $legalFilePath"
+                }
+            }
+        }
+    }
+
+    $runtimeIndexHash = (Get-FileHash -LiteralPath $runtimeIndexPath -Algorithm SHA256).Hash
+    $rootIndexHash = (Get-FileHash -LiteralPath $rootIndexPath -Algorithm SHA256).Hash
+    if ($runtimeIndexHash -ne $rootIndexHash) {
+        throw "頒布ルートとランタイムのパッケージ付属通知索引が一致しません。"
+    }
+}
+
 function Assert-DistributionSafe {
     # ステージング全体に個人データや認証情報が混入していないことを検査する。
     param([Parameter(Mandatory = $true)][string]$DistributionRoot)
 
     $forbiddenDirectoryNames = @(".git", ".codex", ".dotnet", ".vs", "artifacts", "bin", "obj", "TestResults", "node_modules", "packages")
     $forbiddenDirectories = Get-ChildItem -LiteralPath $DistributionRoot -Recurse -Directory -Force | Where-Object {
-        $forbiddenDirectoryNames -contains $_.Name
+        $relativeDirectoryPath = [System.IO.Path]::GetRelativePath($DistributionRoot, $_.FullName)
+        $isPackageLegalDirectory = $relativeDirectoryPath -match '(?i)^(?:runtime[\\/])?licenses[\\/]packages$'
+        $forbiddenDirectoryNames -contains $_.Name -and -not $isPackageLegalDirectory
     }
     if ($forbiddenDirectories.Count -gt 0) {
         $forbiddenPaths = $forbiddenDirectories.FullName -join [Environment]::NewLine
@@ -245,14 +293,17 @@ foreach ($requiredExecutable in @("TaskManager.exe", "taskctl.exe")) {
         throw "発行済みランタイムに必要な実行ファイルがありません: $requiredExecutable"
     }
 }
-Copy-AllowedDirectory -SourceDirectory $publishDirectory -DestinationDirectory $runtimeDirectory
+Copy-AllowedDirectory -SourceDirectory $publishDirectory -DestinationDirectory $runtimeDirectory -AllowLicensePackages
 
 # 頒布ルートでも確認できるよう、発行物に収録済みの.NETライセンス原文を配置する。
 $runtimeLicenseDirectory = Join-Path $runtimeDirectory "licenses"
 Copy-AllowedFile -SourcePath (Join-Path $runtimeLicenseDirectory "Microsoft-DotNet-Library-License.txt") -DestinationPath (Join-Path $stagingDirectory "licenses\Microsoft-DotNet-Library-License.txt")
 Copy-AllowedFile -SourcePath (Join-Path $runtimeLicenseDirectory "Microsoft-DotNet-ThirdPartyNotices.txt") -DestinationPath (Join-Path $stagingDirectory "licenses\Microsoft-DotNet-ThirdPartyNotices.txt")
+Copy-AllowedFile -SourcePath (Join-Path $runtimeLicenseDirectory "package-legal-files.json") -DestinationPath (Join-Path $stagingDirectory "licenses\package-legal-files.json")
+Copy-AllowedDirectory -SourceDirectory (Join-Path $runtimeLicenseDirectory "packages") -DestinationDirectory (Join-Path $stagingDirectory "licenses\packages")
 
 Assert-PublishedDependenciesCovered -DistributionRoot $stagingDirectory -RuntimeDirectory $runtimeDirectory
+Assert-PackageLegalFilesIncluded -DistributionRoot $stagingDirectory -RuntimeLicenseDirectory $runtimeLicenseDirectory
 
 # 必須Skillと初回案内を確認し、個人データ検査を通過した内容だけをZIP化する。
 $requiredDistributionFiles = @(
@@ -266,13 +317,21 @@ $requiredDistributionFiles = @(
     "licenses\Newtonsoft.Json-LICENSE.md",
     "licenses\Microsoft-DotNet-Library-License.txt",
     "licenses\Microsoft-DotNet-ThirdPartyNotices.txt",
+    "licenses\package-legal-files.json",
+    "licenses\packages\Microsoft.NETCore.App.Runtime.win-x64\10.0.11\THIRD-PARTY-NOTICES.TXT",
+    "licenses\packages\Microsoft.AspNetCore.App.Runtime.win-x64\10.0.11\THIRD-PARTY-NOTICES.TXT",
+    "licenses\packages\System.Management\7.0.2\THIRD-PARTY-NOTICES.TXT",
     "最初にお読みください.txt",
     "runtime\TaskManager.exe",
     "runtime\taskctl.exe",
     "runtime\licenses\LICENSE",
     "runtime\licenses\THIRD-PARTY-NOTICES.md",
     "runtime\licenses\Microsoft-DotNet-Library-License.txt",
-    "runtime\licenses\Microsoft-DotNet-ThirdPartyNotices.txt"
+    "runtime\licenses\Microsoft-DotNet-ThirdPartyNotices.txt",
+    "runtime\licenses\package-legal-files.json",
+    "runtime\licenses\packages\Microsoft.NETCore.App.Runtime.win-x64\10.0.11\THIRD-PARTY-NOTICES.TXT",
+    "runtime\licenses\packages\Microsoft.AspNetCore.App.Runtime.win-x64\10.0.11\THIRD-PARTY-NOTICES.TXT",
+    "runtime\licenses\packages\System.Management\7.0.2\THIRD-PARTY-NOTICES.TXT"
 )
 foreach ($requiredDistributionFile in $requiredDistributionFiles) {
     $requiredDistributionPath = Join-Path $stagingDirectory $requiredDistributionFile

@@ -143,8 +143,10 @@ $licenseDirectory = Join-Path $runtimeDirectory "licenses"
 $projectLicensePath = Join-Path $licenseDirectory "LICENSE"
 $thirdPartyNoticePath = Join-Path $licenseDirectory "THIRD-PARTY-NOTICES.md"
 $dotNetLicensePath = Join-Path $licenseDirectory "Microsoft-DotNet-Library-License.txt"
+$packageLegalIndexPath = Join-Path $licenseDirectory "package-legal-files.json"
+$packageLegalDirectory = Join-Path $licenseDirectory "packages"
 $repositorySkill = Join-Path $distributionRoot ".agents\skills\manage-local-tasks"
-foreach ($requiredPath in @($runtimeDirectory, $applicationSource, $commandLineSource, $projectLicensePath, $thirdPartyNoticePath, $dotNetLicensePath)) {
+foreach ($requiredPath in @($runtimeDirectory, $applicationSource, $commandLineSource, $projectLicensePath, $thirdPartyNoticePath, $dotNetLicensePath, $packageLegalIndexPath, $packageLegalDirectory)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "頒布物に必要なファイルがありません: $requiredPath"
     }
@@ -154,6 +156,7 @@ foreach ($requiredPath in @($runtimeDirectory, $applicationSource, $commandLineS
 Write-Output "Task Manager独自部分: MIT License - uniuni (https://x.com/lept_on)"
 Write-Output "第三者コンポーネント: $thirdPartyNoticePath"
 Write-Output "同梱.NETランタイム: $dotNetLicensePath"
+Write-Output "パッケージ付属文書: $packageLegalIndexPath"
 Write-Output "続行して本ソフトウェアを使用する場合、これらのライセンス条件が適用されます。"
 
 if (-not $SkipCodexSkill -and -not (Test-Path -LiteralPath (Join-Path $repositorySkill "SKILL.md"))) {

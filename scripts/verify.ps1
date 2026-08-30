@@ -28,9 +28,13 @@ function Assert-NoForbiddenIntegration {
 function Assert-FrameworkAndAddress {
     # .NET 10への統一とloopback限定アドレスを確認する。 ASCII.
     $buildProperties = Get-Content -LiteralPath (Join-Path $ProjectRoot "Directory.Build.props") -Raw
+    $globalSettings = Get-Content -LiteralPath (Join-Path $ProjectRoot "global.json") -Raw | ConvertFrom-Json
     $taskConstants = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\Domain\TaskConstants.cs") -Raw
     if ($buildProperties -notmatch '<TargetFramework>net10\.0-windows</TargetFramework>') {
         throw "The target framework must be net10.0-windows."
+    }
+    if ([version]$globalSettings.sdk.version -lt [version]"10.0.303") {
+        throw "The selected .NET SDK baseline must include the 10.0.11 security-servicing runtime."
     }
     if ($taskConstants -notmatch 'http://127\.0\.0\.1:48120') {
         throw "The loopback-only listening address was changed."
@@ -122,6 +126,11 @@ function Assert-LicenseInventory {
             throw "The original project asset is missing from the license notice: $projectAsset"
         }
     }
+    foreach ($requiredNoticeDescription in @("package-legal-files.json", "パッケージ付属")) {
+        if ($thirdPartyNotice -notmatch [regex]::Escape($requiredNoticeDescription)) {
+            throw "The package-provided notice collection is not documented: $requiredNoticeDescription"
+        }
+    }
 
     $dependencyManifest = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "licenses\dependencies.json") | ConvertFrom-Json
     $manifestPackageDependencies = @(
@@ -163,15 +172,36 @@ function Assert-LicenseInventory {
         throw "The license dependency manifest does not match the lock files.`n$differenceText"
     }
 
+    $runtimePackVersions = @(
+        $dependencyManifest.components |
+            Where-Object { $_.name -like "runtimepack.*" } |
+            ForEach-Object { [version]$_.version })
+    if ($runtimePackVersions.Count -ne 3 -or @($runtimePackVersions | Where-Object { $_ -lt [version]"10.0.11" }).Count -gt 0) {
+        throw "The runtime pack license inventory must use .NET 10.0.11 or later."
+    }
+
     $distributionScript = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\create-distribution.ps1")
-    foreach ($requiredPattern in @("Assert-PublishedDependenciesCovered", "Microsoft-DotNet-Library-License.txt", "runtime\licenses\LICENSE")) {
+    foreach ($requiredPattern in @(
+        "Assert-PublishedDependenciesCovered",
+        "Assert-PackageLegalFilesIncluded",
+        "AllowLicensePackages",
+        "Microsoft-DotNet-Library-License.txt",
+        "package-legal-files.json",
+        "runtime\licenses\LICENSE")) {
         if ($distributionScript -notmatch [regex]::Escape($requiredPattern)) {
             throw "The distribution script is missing a license packaging rule: $requiredPattern"
         }
     }
 
+    $publishScript = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\publish.ps1")
+    foreach ($requiredPattern in @("Copy-PackageLegalFiles", "Microsoft.NETCore.App.Runtime.win-x64", "Microsoft.AspNetCore.App.Runtime.win-x64", "System.Management")) {
+        if ($publishScript -notmatch [regex]::Escape($requiredPattern)) {
+            throw "The publish script is missing a package-provided notice rule: $requiredPattern"
+        }
+    }
+
     $distributionInstaller = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "Install.ps1")
-    foreach ($requiredPattern in @("MIT License - uniuni (https://x.com/lept_on)", "THIRD-PARTY-NOTICES.md", "Microsoft-DotNet-Library-License.txt")) {
+    foreach ($requiredPattern in @("MIT License - uniuni (https://x.com/lept_on)", "THIRD-PARTY-NOTICES.md", "Microsoft-DotNet-Library-License.txt", "package-legal-files.json")) {
         if ($distributionInstaller -notmatch [regex]::Escape($requiredPattern)) {
             throw "The distribution installer is missing a license display rule: $requiredPattern"
         }
