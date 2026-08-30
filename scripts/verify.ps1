@@ -112,7 +112,7 @@ function Assert-LicenseInventory {
     }
 
     $projectLicense = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "LICENSE")
-    if ($projectLicense -notmatch 'Copyright \(c\) 2026 uniuni\(https://x\.com/lept_on\)') {
+    if ($projectLicense -notmatch 'Copyright \(c\) 2026 uniuni \(https://x\.com/lept_on\)') {
         throw "The project MIT license must contain the approved copyright holder."
     }
 
@@ -171,7 +171,7 @@ function Assert-LicenseInventory {
     }
 
     $distributionInstaller = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "Install.ps1")
-    foreach ($requiredPattern in @("MIT License - uniuni(https://x.com/lept_on)", "THIRD-PARTY-NOTICES.md", "Microsoft-DotNet-Library-License.txt")) {
+    foreach ($requiredPattern in @("MIT License - uniuni (https://x.com/lept_on)", "THIRD-PARTY-NOTICES.md", "Microsoft-DotNet-Library-License.txt")) {
         if ($distributionInstaller -notmatch [regex]::Escape($requiredPattern)) {
             throw "The distribution installer is missing a license display rule: $requiredPattern"
         }

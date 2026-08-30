@@ -8,7 +8,7 @@ AI・開発者向けの設計資料は[Task Manager設計Vault](docs/TaskManager
 
 本プロジェクトが独自に作成したソース、文書、`TaskManager.ico`、`favicon.svg`はMIT Licenseで提供します。
 
-Copyright (c) 2026 uniuni([https://x.com/lept_on](https://x.com/lept_on))
+Copyright (c) 2026 uniuni ([https://x.com/lept_on](https://x.com/lept_on))
 
 ライセンス本文は[LICENSE](LICENSE)、外部ライブラリと自己完結型.NETランタイムの条件は[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)を確認してください。頒布物とインストール先にも同じ情報と、発行に使用した.NET SDK付属のライセンス原文を収録します。
 

@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Task Managerの独自部分は、ルートの`LICENSE`に記載したMIT Licenseで提供します。著作権者はuniuni（https://x.com/lept_on）です。
+Task Managerの独自部分は、ルートの`LICENSE`に記載したMIT Licenseで提供します。著作権者はuniuni ([https://x.com/lept_on](https://x.com/lept_on))です。
 
 `src/TaskManager.App/Assets/TaskManager.ico`と`src/TaskManager.App/wwwroot/favicon.svg`は本プロジェクトで独自に作成した素材であり、外部素材ではありません。これらも本プロジェクトのMIT Licenseの対象です。
 

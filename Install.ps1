@@ -151,7 +151,7 @@ foreach ($requiredPath in @($runtimeDirectory, $applicationSource, $commandLineS
 }
 
 # インストール前に独自部分と同梱.NETランタイムへ別の条件が適用されることを表示する。
-Write-Output "Task Manager独自部分: MIT License - uniuni(https://x.com/lept_on)"
+Write-Output "Task Manager独自部分: MIT License - uniuni (https://x.com/lept_on)"
 Write-Output "第三者コンポーネント: $thirdPartyNoticePath"
 Write-Output "同梱.NETランタイム: $dotNetLicensePath"
 Write-Output "続行して本ソフトウェアを使用する場合、これらのライセンス条件が適用されます。"
