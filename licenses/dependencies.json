@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "name": "Google.Apis.Calendar.v3",
+      "version": "1.75.0.4206",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
+      "name": "Google.Apis",
+      "version": "1.75.0",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
+      "name": "Google.Apis.Auth",
+      "version": "1.75.0",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
+      "name": "Google.Apis.Core",
+      "version": "1.75.0",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
+      "name": "Microsoft.Data.Sqlite.Core",
+      "version": "10.0.11",
+      "license": "MIT",
+      "scope": "runtime"
+    },
+    {
+      "name": "Newtonsoft.Json",
+      "version": "13.0.4",
+      "license": "MIT",
+      "scope": "runtime"
+    },
+    {
+      "name": "SQLitePCLRaw.core",
+      "version": "2.1.12",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
+      "name": "SQLitePCLRaw.provider.winsqlite3",
+      "version": "2.1.11",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
+      "name": "System.Management",
+      "version": "7.0.2",
+      "license": "MIT",
+      "scope": "runtime"
+    },
+    {
+      "name": "System.CodeDom",
+      "version": "7.0.0",
+      "license": "MIT",
+      "scope": "development"
+    },
+    {
+      "name": "runtimepack.Microsoft.NETCore.App.Runtime.win-x64",
+      "version": "10.0.10",
+      "license": "Microsoft .NET Library License",
+      "scope": "runtime"
+    },
+    {
+      "name": "runtimepack.Microsoft.AspNetCore.App.Runtime.win-x64",
+      "version": "10.0.10",
+      "license": "Microsoft .NET Library License",
+      "scope": "runtime"
+    },
+    {
+      "name": "runtimepack.Microsoft.WindowsDesktop.App.Runtime.win-x64",
+      "version": "10.0.10",
+      "license": "Microsoft .NET Library License",
+      "scope": "runtime"
+    }
+  ]
+}

@@ -103,6 +103,42 @@ function Assert-CodexDefaultIsEmpty {
     }
 }
 
+function Assert-PublishedDependenciesCovered {
+    # 発行済み依存関係と承認済みライセンス一覧が完全一致することを検証する。
+    param(
+        [Parameter(Mandatory = $true)][string]$DistributionRoot,
+        [Parameter(Mandatory = $true)][string]$RuntimeDirectory
+    )
+
+    $dependencyManifestPath = Join-Path $DistributionRoot "licenses\dependencies.json"
+    $dependencyManifest = Get-Content -Raw -LiteralPath $dependencyManifestPath | ConvertFrom-Json
+    $approvedRuntimeDependencies = @(
+        $dependencyManifest.components |
+            Where-Object { $_.scope -eq "runtime" } |
+            ForEach-Object { "$($_.name)/$($_.version)" } |
+            Sort-Object -Unique)
+
+    $publishedDependencies = @(
+        Get-ChildItem -LiteralPath $RuntimeDirectory -Filter "*.deps.json" -File |
+            ForEach-Object {
+                $dependencyData = Get-Content -Raw -LiteralPath $_.FullName | ConvertFrom-Json
+                $dependencyData.libraries.PSObject.Properties |
+                    Where-Object { $_.Value.type -in @("package", "runtimepack") } |
+                    ForEach-Object { $_.Name }
+            } |
+            Sort-Object -Unique)
+
+    $unlistedDependencies = @($publishedDependencies | Where-Object { $_ -notin $approvedRuntimeDependencies })
+    if ($unlistedDependencies.Count -gt 0) {
+        throw "頒布ライセンス一覧にない発行依存関係があります:`n$($unlistedDependencies -join [Environment]::NewLine)"
+    }
+
+    $missingDependencies = @($approvedRuntimeDependencies | Where-Object { $_ -notin $publishedDependencies })
+    if ($missingDependencies.Count -gt 0) {
+        throw "頒布ライセンス一覧の実行時依存関係が発行物にありません:`n$($missingDependencies -join [Environment]::NewLine)"
+    }
+}
+
 function Assert-DistributionSafe {
     # ステージング全体に個人データや認証情報が混入していないことを検査する。
     param([Parameter(Mandatory = $true)][string]$DistributionRoot)
@@ -185,8 +221,10 @@ $allowedRootFiles = @(
     "AGENTS.md",
     "Directory.Build.props",
     "global.json",
+    "LICENSE",
     "README.md",
     "TaskManager.slnx",
+    "THIRD-PARTY-NOTICES.md",
     "Install.ps1",
     "最初にお読みください.txt"
 )
@@ -194,7 +232,7 @@ foreach ($allowedRootFile in $allowedRootFiles) {
     Copy-AllowedFile -SourcePath (Join-Path $ProjectRoot $allowedRootFile) -DestinationPath (Join-Path $stagingDirectory $allowedRootFile)
 }
 
-$allowedRootDirectories = @(".agents", "docs", "integrations", "scripts", "src", "tests")
+$allowedRootDirectories = @(".agents", "docs", "integrations", "licenses", "scripts", "src", "tests")
 foreach ($allowedRootDirectory in $allowedRootDirectories) {
     Copy-AllowedDirectory -SourceDirectory (Join-Path $ProjectRoot $allowedRootDirectory) -DestinationDirectory (Join-Path $stagingDirectory $allowedRootDirectory)
 }
@@ -209,13 +247,32 @@ foreach ($requiredExecutable in @("TaskManager.exe", "taskctl.exe")) {
 }
 Copy-AllowedDirectory -SourceDirectory $publishDirectory -DestinationDirectory $runtimeDirectory
 
+# 頒布ルートでも確認できるよう、発行物に収録済みの.NETライセンス原文を配置する。
+$runtimeLicenseDirectory = Join-Path $runtimeDirectory "licenses"
+Copy-AllowedFile -SourcePath (Join-Path $runtimeLicenseDirectory "Microsoft-DotNet-Library-License.txt") -DestinationPath (Join-Path $stagingDirectory "licenses\Microsoft-DotNet-Library-License.txt")
+Copy-AllowedFile -SourcePath (Join-Path $runtimeLicenseDirectory "Microsoft-DotNet-ThirdPartyNotices.txt") -DestinationPath (Join-Path $stagingDirectory "licenses\Microsoft-DotNet-ThirdPartyNotices.txt")
+
+Assert-PublishedDependenciesCovered -DistributionRoot $stagingDirectory -RuntimeDirectory $runtimeDirectory
+
 # 必須Skillと初回案内を確認し、個人データ検査を通過した内容だけをZIP化する。
 $requiredDistributionFiles = @(
     ".agents\skills\manage-local-tasks\SKILL.md",
     ".agents\skills\manage-local-tasks\scripts\invoke-taskctl.ps1",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md",
+    "licenses\dependencies.json",
+    "licenses\Apache-2.0.txt",
+    "licenses\DotNet-MIT-LICENSE.txt",
+    "licenses\Newtonsoft.Json-LICENSE.md",
+    "licenses\Microsoft-DotNet-Library-License.txt",
+    "licenses\Microsoft-DotNet-ThirdPartyNotices.txt",
     "最初にお読みください.txt",
     "runtime\TaskManager.exe",
-    "runtime\taskctl.exe"
+    "runtime\taskctl.exe",
+    "runtime\licenses\LICENSE",
+    "runtime\licenses\THIRD-PARTY-NOTICES.md",
+    "runtime\licenses\Microsoft-DotNet-Library-License.txt",
+    "runtime\licenses\Microsoft-DotNet-ThirdPartyNotices.txt"
 )
 foreach ($requiredDistributionFile in $requiredDistributionFiles) {
     $requiredDistributionPath = Join-Path $stagingDirectory $requiredDistributionFile

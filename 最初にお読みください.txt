@@ -6,7 +6,7 @@
 
 ----- ここから -----
 このフォルダーに含まれる Task Manager を、この PC で利用し、必要に応じて改良できる状態にしてください。
-最初にルートの AGENTS.md、docs/TaskManager-Vault/00_入口.md、docs/TaskManager-Vault/08_頒布と受取人セットアップ.md、.agents/skills/manage-local-tasks/SKILL.md を読み、記載された規則を守ってください。
+最初にルートの AGENTS.md、LICENSE、THIRD-PARTY-NOTICES.md、docs/TaskManager-Vault/00_入口.md、docs/TaskManager-Vault/08_頒布と受取人セットアップ.md、docs/TaskManager-Vault/10_ライセンスと第三者コンポーネント.md、.agents/skills/manage-local-tasks/SKILL.md を読み、記載された規則を守ってください。
 その後、頒布物に個人データや資格情報が含まれていないことを読み取りだけで確認し、この PC の環境を診断して、私に必要な準備と選択肢を短く説明してください。インストールや設定変更が必要な場合は、実行前に用途と影響を説明し、私の確認を得てください。
 日常のタスク操作と、このソフトウェアを Codex で改良する作業の両方を始められる状態まで案内し、可能な確認テストまで実施してください。
 ----- ここまで -----

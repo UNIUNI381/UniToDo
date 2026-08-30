@@ -139,12 +139,22 @@ $distributionRoot = $PSScriptRoot
 $runtimeDirectory = Join-Path $distributionRoot "runtime"
 $applicationSource = Join-Path $runtimeDirectory "TaskManager.exe"
 $commandLineSource = Join-Path $runtimeDirectory "taskctl.exe"
+$licenseDirectory = Join-Path $runtimeDirectory "licenses"
+$projectLicensePath = Join-Path $licenseDirectory "LICENSE"
+$thirdPartyNoticePath = Join-Path $licenseDirectory "THIRD-PARTY-NOTICES.md"
+$dotNetLicensePath = Join-Path $licenseDirectory "Microsoft-DotNet-Library-License.txt"
 $repositorySkill = Join-Path $distributionRoot ".agents\skills\manage-local-tasks"
-foreach ($requiredPath in @($runtimeDirectory, $applicationSource, $commandLineSource)) {
+foreach ($requiredPath in @($runtimeDirectory, $applicationSource, $commandLineSource, $projectLicensePath, $thirdPartyNoticePath, $dotNetLicensePath)) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
         throw "頒布物に必要なファイルがありません: $requiredPath"
     }
 }
+
+# インストール前に独自部分と同梱.NETランタイムへ別の条件が適用されることを表示する。
+Write-Output "Task Manager独自部分: MIT License - uniuni(https://x.com/lept_on)"
+Write-Output "第三者コンポーネント: $thirdPartyNoticePath"
+Write-Output "同梱.NETランタイム: $dotNetLicensePath"
+Write-Output "続行して本ソフトウェアを使用する場合、これらのライセンス条件が適用されます。"
 
 if (-not $SkipCodexSkill -and -not (Test-Path -LiteralPath (Join-Path $repositorySkill "SKILL.md"))) {
     throw "頒布物にmanage-local-tasks Skillがありません: $repositorySkill"

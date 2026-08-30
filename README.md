@@ -4,6 +4,14 @@
 
 AI・開発者向けの設計資料は[Task Manager設計Vault](docs/TaskManager-Vault/00_入口.md)にあります。Obsidianでは`docs/TaskManager-Vault`を専用Vaultとして開きます。
 
+## ライセンス
+
+本プロジェクトが独自に作成したソース、文書、`TaskManager.ico`、`favicon.svg`はMIT Licenseで提供します。
+
+Copyright (c) 2026 uniuni([https://x.com/lept_on](https://x.com/lept_on))
+
+ライセンス本文は[LICENSE](LICENSE)、外部ライブラリと自己完結型.NETランタイムの条件は[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)を確認してください。頒布物とインストール先にも同じ情報と、発行に使用した.NET SDK付属のライセンス原文を収録します。
+
 ## 主な機能
 
 - 期限までの累積作業量を基に、期限リスク0.45、重要度0.25、後続解放0.10、延期0.10、継続性0.10、開始可能日からの経過0.10を相対加重平均して優先順位を計算
@@ -52,7 +60,7 @@ dotnet --list-sdks
 pwsh -NoProfile -File .\scripts\create-distribution.ps1
 ```
 
-PowerShell 7が必要です。生成物は`artifacts/distribution`配下です。ワークスペースを手動でZIP化せず、必ずこのスクリプトを使用します。DB、バックアップ、資格情報、OAuthトークン、実タスク、作成者固有のCodexタスクIDは含まれません。
+PowerShell 7が必要です。生成物は`artifacts/distribution`配下です。ワークスペースを手動でZIP化せず、必ずこのスクリプトを使用します。DB、バックアップ、資格情報、OAuthトークン、実タスク、作成者固有のCodexタスクIDは含まれません。発行済み依存関係と`licenses/dependencies.json`が一致しない場合や、必要なライセンス原文が欠けている場合はZIPを生成しません。
 
 受取人はZIPを展開し、展開ルートをCodexの作業フォルダーとして開いてから、`最初にお読みください.txt`のプロンプトをCodexへ入力します。Codexが`AGENTS.md`と設計Vaultを読み、環境確認、`Install.ps1`、タスク操作、開発準備を案内します。詳細は[頒布と受取人セットアップ](docs/TaskManager-Vault/08_頒布と受取人セットアップ.md)を参照してください。
 

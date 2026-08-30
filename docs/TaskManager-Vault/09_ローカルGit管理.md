@@ -13,8 +13,9 @@
 | `.agents/` | このリポジトリを安全に操作するCodex Skillと設定 |
 | `src/`、`tests/` | アプリ、CLI、テスト、プロジェクト定義、lockファイル、正規の画像・Web資産 |
 | `scripts/`、`integrations/` | ビルド、テスト、発行、導入、頒布、外部連携のソース |
+| `licenses/` | 第三者ライセンス原文と依存関係の機械検査用一覧 |
 | `docs/` | AI操作ガイド、設計Vault、共有に必要なObsidian設定 |
-| ルート文書 | `AGENTS.md`、`README.md`、`最初にお読みください.txt` |
+| ルート文書 | `AGENTS.md`、`README.md`、`LICENSE`、`THIRD-PARTY-NOTICES.md`、`最初にお読みください.txt` |
 | ルート構成 | `.gitignore`、`Directory.Build.props`、`global.json`、`TaskManager.slnx`、`Install.ps1` |
 
 Vaultでは`.obsidian/app.json`と`.obsidian/.gitignore`を追跡します。リンク形式は共有しますが、ワークスペース、外観、有効プラグイン、キャッシュ、ホットキーは個人設定として除外します。

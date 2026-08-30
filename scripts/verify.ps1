@@ -94,6 +94,90 @@ function Assert-DistributionSecretExclusions {
     }
 }
 
+function Assert-LicenseInventory {
+    # 独自ライセンス表示と全lockファイルの第三者依存一覧が一致することを検査する。 ASCII.
+    $requiredLicenseFiles = @(
+        "LICENSE"
+        "THIRD-PARTY-NOTICES.md"
+        "licenses\dependencies.json"
+        "licenses\Apache-2.0.txt"
+        "licenses\DotNet-MIT-LICENSE.txt"
+        "licenses\Newtonsoft.Json-LICENSE.md"
+    )
+    foreach ($requiredLicenseFile in $requiredLicenseFiles) {
+        $requiredLicensePath = Join-Path $ProjectRoot $requiredLicenseFile
+        if (-not (Test-Path -LiteralPath $requiredLicensePath -PathType Leaf)) {
+            throw "A required license file is missing: $requiredLicenseFile"
+        }
+    }
+
+    $projectLicense = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "LICENSE")
+    if ($projectLicense -notmatch 'Copyright \(c\) 2026 uniuni\(https://x\.com/lept_on\)') {
+        throw "The project MIT license must contain the approved copyright holder."
+    }
+
+    $thirdPartyNotice = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "THIRD-PARTY-NOTICES.md")
+    foreach ($projectAsset in @("TaskManager.ico", "favicon.svg")) {
+        if ($thirdPartyNotice -notmatch [regex]::Escape($projectAsset)) {
+            throw "The original project asset is missing from the license notice: $projectAsset"
+        }
+    }
+
+    $dependencyManifest = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "licenses\dependencies.json") | ConvertFrom-Json
+    $manifestPackageDependencies = @(
+        $dependencyManifest.components |
+            Where-Object { $_.name -notlike "runtimepack.*" } |
+            ForEach-Object { "$($_.name)/$($_.version)" } |
+            Sort-Object -Unique)
+    $duplicateManifestDependencies = @(
+        $dependencyManifest.components |
+            Group-Object { "$($_.name)/$($_.version)" } |
+            Where-Object { $_.Count -ne 1 })
+    if ($duplicateManifestDependencies.Count -gt 0) {
+        throw "The license dependency manifest contains duplicate entries."
+    }
+
+    $lockFilePaths = @(
+        "src\TaskManager.App\packages.lock.json"
+        "src\TaskManager.Cli\packages.lock.json"
+        "tests\TaskManager.Tests\packages.lock.json"
+    )
+    $lockedPackageDependencies = @(
+        foreach ($lockFilePath in $lockFilePaths) {
+            $lockData = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot $lockFilePath) | ConvertFrom-Json
+            foreach ($frameworkProperty in $lockData.dependencies.PSObject.Properties) {
+                $frameworkProperty.Value.PSObject.Properties |
+                    Where-Object { $_.Value.type -ne "Project" } |
+                    ForEach-Object { "$($_.Name)/$($_.Value.resolved)" }
+            }
+        }
+    )
+    $lockedPackageDependencies = @($lockedPackageDependencies | Sort-Object -Unique)
+
+    $unlistedLockedDependencies = @($lockedPackageDependencies | Where-Object { $_ -notin $manifestPackageDependencies })
+    $staleManifestDependencies = @($manifestPackageDependencies | Where-Object { $_ -notin $lockedPackageDependencies })
+    if ($unlistedLockedDependencies.Count -gt 0 -or $staleManifestDependencies.Count -gt 0) {
+        $differenceText = @(
+            "Unlisted locked dependencies: $($unlistedLockedDependencies -join ', ')"
+            "Stale manifest dependencies: $($staleManifestDependencies -join ', ')") -join [Environment]::NewLine
+        throw "The license dependency manifest does not match the lock files.`n$differenceText"
+    }
+
+    $distributionScript = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "scripts\create-distribution.ps1")
+    foreach ($requiredPattern in @("Assert-PublishedDependenciesCovered", "Microsoft-DotNet-Library-License.txt", "runtime\licenses\LICENSE")) {
+        if ($distributionScript -notmatch [regex]::Escape($requiredPattern)) {
+            throw "The distribution script is missing a license packaging rule: $requiredPattern"
+        }
+    }
+
+    $distributionInstaller = Get-Content -Raw -LiteralPath (Join-Path $ProjectRoot "Install.ps1")
+    foreach ($requiredPattern in @("MIT License - uniuni(https://x.com/lept_on)", "THIRD-PARTY-NOTICES.md", "Microsoft-DotNet-Library-License.txt")) {
+        if ($distributionInstaller -notmatch [regex]::Escape($requiredPattern)) {
+            throw "The distribution installer is missing a license display rule: $requiredPattern"
+        }
+    }
+}
+
 # 静的な受け入れ条件を検査する。 ASCII.
 Assert-NoForbiddenIntegration
 Assert-FrameworkAndAddress
@@ -101,4 +185,5 @@ Assert-ApplicationIcon
 Assert-WatchdogInstallation
 Assert-WatchdogUninstallation
 Assert-DistributionSecretExclusions
+Assert-LicenseInventory
 Write-Output "Static verification passed."
