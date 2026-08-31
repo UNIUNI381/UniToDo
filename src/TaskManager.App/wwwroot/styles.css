@@ -52,6 +52,8 @@ nav { display: grid; gap: 6px; }
 .meta-item strong { display: block; font-size: 20px; }
 .meta-item span { color: var(--muted); font-size: 12px; }
 .action-row, .inline-actions, .dialog-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.recommendation-actions { position: relative; z-index: 1; }
+.recommendation-edit-button { margin-left: auto; }
 .wait-recommendation-actions { position: relative; z-index: 1; justify-content: flex-end; margin-top: 28px; }
 .primary-button, .secondary-button, .danger-button, .file-button { border-radius: 10px; padding: 10px 16px; border: 1px solid transparent; font-weight: 700; }
 .primary-button { background: var(--green); color: white; }

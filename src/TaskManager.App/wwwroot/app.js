@@ -1249,14 +1249,24 @@ function renderRecommendation(result) {
       <div class="meta-item"><strong>${evaluation.priorityScore}</strong><span>優先度スコア</span></div>
     </div>
     <p><strong>完了条件：</strong>${escapeHtml(task.completionCondition || `${task.title}を完了する`)}</p>
-    <div class="action-row">
+    <div class="action-row recommendation-actions">
       <button class="primary-button dashboard-task-action-button${isRunning ? " running-button" : ""}" data-action="start" data-task="${escapeAttribute(task.identifier)}" ${isRunning ? "disabled aria-disabled=\"true\"" : ""}>${isRunning ? "実行中" : "開始"}</button>
       <button class="${isRunning ? "primary-button" : "secondary-button"} dashboard-task-action-button" data-action="complete" data-task="${escapeAttribute(task.identifier)}" ${isRunning ? "" : "data-confirm-non-running-completion=\"true\""}>完了</button>
       <button class="secondary-button dashboard-task-action-button" data-action="continue" data-task="${escapeAttribute(task.identifier)}" ${isRunning ? "" : "disabled aria-disabled=\"true\""}>続行</button>
       <button class="secondary-button dashboard-task-action-button" data-action="interrupt" data-task="${escapeAttribute(task.identifier)}" ${isRunning ? "" : "disabled aria-disabled=\"true\""}>中断</button>
       <button class="secondary-button" data-action="postpone" data-task="${escapeAttribute(task.identifier)}">1時間延期</button>
+      <button type="button" class="secondary-button recommendation-edit-button" data-dashboard-task-edit="${escapeAttribute(task.identifier)}">編集</button>
     </div>`;
   bindTaskActionButtons(card);
+  card.querySelector("[data-dashboard-task-edit]").addEventListener("click", async function handleRecommendationTaskEditClick() {
+    // 推薦タスクの最新情報を取得して既存の編集ダイアログを開く。
+    try {
+      await loadTasks();
+      openTaskDialog(task.identifier);
+    } catch (error) {
+      showNotice(error.message, true);
+    }
+  });
   updateElapsedTimeDisplays();
 }
 
