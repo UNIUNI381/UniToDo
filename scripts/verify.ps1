@@ -69,6 +69,31 @@ function Assert-ApplicationIcon {
     }
 }
 
+function Assert-ApplicationDisplayName {
+    # 利用者向け表示名をUniToDoへ統一し、開発上の出力名を維持していることを検査する。 ASCII.
+    $taskConstants = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\Domain\TaskConstants.cs") -Raw -Encoding UTF8
+    $applicationProject = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\TaskManager.App.csproj") -Raw -Encoding UTF8
+    $webPage = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\wwwroot\index.html") -Raw -Encoding UTF8
+    $typeWhisperManifest = Get-Content -LiteralPath (Join-Path $ProjectRoot "integrations\TypeWhisper.TaskManagerOutput\manifest.json") -Raw -Encoding UTF8
+    if ($taskConstants -notmatch 'ApplicationDisplayName = "UniToDo"' -or
+        $taskConstants -notmatch 'WatchdogScheduledTaskName = "UniToDo Watchdog"') {
+        throw "The UniToDo display-name constants are missing."
+    }
+    foreach ($requiredProjectProperty in @("<AssemblyName>TaskManager</AssemblyName>", "<AssemblyTitle>UniToDo</AssemblyTitle>", "<Product>UniToDo</Product>")) {
+        if ($applicationProject -notmatch [regex]::Escape($requiredProjectProperty)) {
+            throw "The executable metadata does not preserve the development name and expose UniToDo: $requiredProjectProperty"
+        }
+    }
+    foreach ($requiredWebText in @("<title>UniToDo</title>", "<strong>UniToDo</strong>")) {
+        if ($webPage -notmatch [regex]::Escape($requiredWebText)) {
+            throw "The web UI is missing the UniToDo display name: $requiredWebText"
+        }
+    }
+    if ($typeWhisperManifest -notmatch '"name": "UniToDo Review Output"') {
+        throw "The TypeWhisper integration display name is not UniToDo."
+    }
+}
+
 function Assert-WatchdogInstallation {
     # Codexの実行ジョブ外で監視親を起動し、誤ったユーザーパスをショートカットへ保存しないことを検査する。 ASCII.
     $installerPaths = @(
@@ -78,7 +103,11 @@ function Assert-WatchdogInstallation {
         $installerSource = Get-Content -LiteralPath $installerPath -Raw -Encoding UTF8
         if ($installerSource -notmatch 'Register-ScheduledTask' -or
             $installerSource -notmatch 'Start-ScheduledTask' -or
-            $installerSource -notmatch '%LOCALAPPDATA%') {
+            $installerSource -notmatch '%LOCALAPPDATA%' -or
+            $installerSource -notmatch 'UniToDo Watchdog' -or
+            $installerSource -notmatch 'UniToDo\.lnk' -or
+            $installerSource -notmatch 'LocalTaskManager Watchdog' -or
+            $installerSource -notmatch 'TaskManager\.lnk') {
             throw "The installer must register the watchdog with Task Scheduler and preserve the LOCALAPPDATA shortcut path: $installerPath"
         }
     }
@@ -97,8 +126,11 @@ function Assert-WatchdogUninstallation {
     $uninstallerSource = Get-Content -LiteralPath $uninstallerPath -Raw -Encoding UTF8
     if ($uninstallerSource -notmatch 'Stop-ScheduledTask' -or
         $uninstallerSource -notmatch 'Unregister-ScheduledTask' -or
-        $uninstallerSource -notmatch 'LocalTaskManager Watchdog') {
-        throw "The uninstaller must stop and unregister the watchdog task."
+        $uninstallerSource -notmatch 'UniToDo Watchdog' -or
+        $uninstallerSource -notmatch 'LocalTaskManager Watchdog' -or
+        $uninstallerSource -notmatch 'UniToDo\.lnk' -or
+        $uninstallerSource -notmatch 'TaskManager\.lnk') {
+        throw "The uninstaller must remove both current and legacy watchdog tasks and shortcuts."
     }
 }
 
@@ -228,6 +260,7 @@ Assert-WindowsPowerShellCompatibility
 Assert-NoForbiddenIntegration
 Assert-FrameworkAndAddress
 Assert-ApplicationIcon
+Assert-ApplicationDisplayName
 Assert-WatchdogInstallation
 Assert-WatchdogUninstallation
 Assert-DistributionSecretExclusions

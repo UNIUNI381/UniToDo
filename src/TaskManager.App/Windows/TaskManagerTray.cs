@@ -330,7 +330,7 @@ public sealed class TaskManagerTray(
             notificationIcon = new NotifyIcon
             {
                 Icon = taskManagerIcon,
-                Text = "ローカルタスク管理",
+                Text = TaskConstants.ApplicationDisplayName,
                 Visible = true,
                 ContextMenuStrip = contextMenu
             };

@@ -8,7 +8,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 function New-TaskManagerShortcut {
-    # Task Managerを起動するWindowsショートカットを作成する。
+    # UniToDoを起動するWindowsショートカットを作成する。
     param(
         [Parameter(Mandatory = $true)][string]$ShortcutPath,
         [Parameter(Mandatory = $true)][string]$ExecutablePath,
@@ -43,7 +43,7 @@ function Register-TaskManagerWatchdog {
     param([Parameter(Mandatory = $true)][string]$ExecutablePath)
 
     # 同じユーザーの対話セッションでログオン時に起動するタスクを上書き登録する。
-    $scheduledTaskName = "LocalTaskManager Watchdog"
+    $scheduledTaskName = "UniToDo Watchdog"
     $scheduledTaskUser = "$env:USERDOMAIN\$env:USERNAME"
     $scheduledTaskAction = New-ScheduledTaskAction -Execute $ExecutablePath -Argument "--watchdog" -WorkingDirectory (Split-Path -Parent $ExecutablePath)
     $scheduledTaskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $scheduledTaskUser
@@ -65,7 +65,7 @@ function Register-TaskManagerWatchdog {
         -Trigger $scheduledTaskTrigger `
         -Settings $scheduledTaskSettings `
         -Principal $scheduledTaskPrincipal `
-        -Description "Local Task Manager watchdog" `
+        -Description "UniToDo automatic startup and recovery" `
         -Force | Out-Null
 }
 
@@ -153,7 +153,7 @@ foreach ($requiredPath in @($runtimeDirectory, $applicationSource, $commandLineS
 }
 
 # インストール前に独自部分と同梱.NETランタイムへ別の条件が適用されることを表示する。
-Write-Output "Task Manager独自部分: MIT License - uniuni (https://x.com/lept_on)"
+Write-Output "UniToDo独自部分: MIT License - uniuni (https://x.com/lept_on)"
 Write-Output "第三者コンポーネント: $thirdPartyNoticePath"
 Write-Output "同梱.NETランタイム: $dotNetLicensePath"
 Write-Output "パッケージ付属文書: $packageLegalIndexPath"
@@ -167,9 +167,13 @@ if (-not $SkipCodexSkill -and -not (Test-Path -LiteralPath (Join-Path $repositor
 $localApplicationData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
 $installDirectory = Join-Path $localApplicationData "Programs\TaskManager"
 $applicationExecutable = Join-Path $installDirectory "TaskManager.exe"
-if ($PSCmdlet.ShouldProcess($installDirectory, "Task Managerランタイムをインストール")) {
-    # 更新中にWindows側の再起動が割り込まないよう登録済みタスクを先に停止する。
-    Stop-ScheduledTask -TaskName "LocalTaskManager Watchdog" -ErrorAction SilentlyContinue
+if ($PSCmdlet.ShouldProcess($installDirectory, "UniToDoランタイムをインストール")) {
+    # 更新中にWindows側の再起動が割り込まないよう新旧の登録済みタスクを停止し、旧名だけを解除する。
+    $legacyScheduledTaskName = "LocalTaskManager Watchdog"
+    foreach ($registeredTaskName in @("UniToDo Watchdog", $legacyScheduledTaskName)) {
+        Stop-ScheduledTask -TaskName $registeredTaskName -ErrorAction SilentlyContinue
+    }
+    Unregister-ScheduledTask -TaskName $legacyScheduledTaskName -Confirm:$false -ErrorAction SilentlyContinue
     Stop-InstalledTaskManager -ExecutablePath $applicationExecutable
     New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
     Get-ChildItem -Force -LiteralPath $runtimeDirectory | Copy-Item -Destination $installDirectory -Recurse -Force
@@ -178,15 +182,23 @@ if ($PSCmdlet.ShouldProcess($installDirectory, "Task Managerランタイムを�
 # デスクトップショートカットを作成し、旧スタートアップ登録を整理する。
 $startupDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 $desktopDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
-$startupShortcut = Join-Path $startupDirectory "TaskManager.lnk"
-$desktopShortcut = Join-Path $desktopDirectory "TaskManager.lnk"
-if ((Test-Path -LiteralPath $startupShortcut) -and $PSCmdlet.ShouldProcess($startupShortcut, "旧スタートアップショートカットを削除")) {
-    Remove-Item -LiteralPath $startupShortcut -Force
+$legacyShortcutName = "TaskManager.lnk"
+$applicationShortcutName = "UniToDo.lnk"
+foreach ($startupShortcutName in @($legacyShortcutName, $applicationShortcutName)) {
+    $startupShortcut = Join-Path $startupDirectory $startupShortcutName
+    if ((Test-Path -LiteralPath $startupShortcut) -and $PSCmdlet.ShouldProcess($startupShortcut, "旧スタートアップショートカットを削除")) {
+        Remove-Item -LiteralPath $startupShortcut -Force
+    }
 }
+$legacyDesktopShortcut = Join-Path $desktopDirectory $legacyShortcutName
+if ((Test-Path -LiteralPath $legacyDesktopShortcut) -and $PSCmdlet.ShouldProcess($legacyDesktopShortcut, "旧デスクトップショートカットを削除")) {
+    Remove-Item -LiteralPath $legacyDesktopShortcut -Force
+}
+$desktopShortcut = Join-Path $desktopDirectory $applicationShortcutName
 if ($PSCmdlet.ShouldProcess($desktopShortcut, "デスクトップショートカットを作成")) {
     New-TaskManagerShortcut -ShortcutPath $desktopShortcut -ExecutablePath $applicationExecutable
 }
-if ($PSCmdlet.ShouldProcess("LocalTaskManager Watchdog", "監視親のログオンタスクを登録")) {
+if ($PSCmdlet.ShouldProcess("UniToDo Watchdog", "監視親のログオンタスクを登録")) {
     Register-TaskManagerWatchdog -ExecutablePath $applicationExecutable
 }
 
@@ -225,8 +237,8 @@ if (-not $SkipCodexSkill) {
 }
 
 # インストール後にアプリを起動し、次に行う疎通確認を案内する。
-if (-not $DoNotStart -and $PSCmdlet.ShouldProcess($applicationExecutable, "Task Managerを起動")) {
-    Start-ScheduledTask -TaskName "LocalTaskManager Watchdog"
+if (-not $DoNotStart -and $PSCmdlet.ShouldProcess($applicationExecutable, "UniToDoを起動")) {
+    Start-ScheduledTask -TaskName "UniToDo Watchdog"
 }
 
 if ($WhatIfPreference) {

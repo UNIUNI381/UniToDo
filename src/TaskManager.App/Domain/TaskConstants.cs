@@ -3,6 +3,9 @@ namespace TaskManager.Domain;
 /// <summary>タスク管理全体で利用する固定値を定義する。</summary>
 public static class TaskConstants
 {
+    // 利用者へ表示する正式な製品名を定義する。
+    public const string ApplicationDisplayName = "UniToDo";
+
     // 状態値を画面・CLI・保存層で共通化する。
     public const string InboxStatus = "受信箱";
     public const string DraftStatus = "下書き";
@@ -31,8 +34,8 @@ public static class TaskConstants
     public const int LocalPort = 48120;
     public const string LocalAddress = "http://127.0.0.1:48120";
 
-    // Windowsタスクスケジューラへ登録する監視親のタスク名を定義する。
-    public const string WatchdogScheduledTaskName = "LocalTaskManager Watchdog";
+    // Windowsタスクスケジューラへ登録する監視親の表示名を定義する。
+    public const string WatchdogScheduledTaskName = "UniToDo Watchdog";
 
     // 音声入力の送信先が未設定であることを表す初期値を定義する。
     public const string DefaultCodexThreadIdentifier = "";

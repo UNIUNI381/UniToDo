@@ -1,9 +1,9 @@
 ---
 name: update-task-manager-system
-description: 本リポジトリのTask Managerにソース、DB、API・CLI、画面、テスト、ビルド、配布、運用の変更を加える開発依頼で使用する。実装とObsidian Vaultを現行仕様へ同期し、ローカルGitで安全に記録する。
+description: 本リポジトリのUniToDo（開発名TaskManager）にソース、DB、API・CLI、画面、テスト、ビルド、配布、運用の変更を加える開発依頼で使用する。実装とObsidian Vaultを現行仕様へ同期し、ローカルGitで安全に記録する。
 ---
 
-# Task Managerシステム更新
+# UniToDoシステム更新
 
 日常のタスク操作には`manage-local-tasks`を使い、このSkillは開発変更だけに使用する。
 

@@ -119,7 +119,7 @@ public static class ApiEndpoints
         if (!taskManagerTray.CanShowCodexReview)
         {
             return Results.Json(
-                new { error = "Task Managerの確認画面を表示できません。" },
+                new { error = $"{TaskConstants.ApplicationDisplayName}の確認画面を表示できません。" },
                 statusCode: StatusCodes.Status503ServiceUnavailable);
         }
         voiceInputCoordinator.CompleteRecognition();

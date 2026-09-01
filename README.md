@@ -1,8 +1,10 @@
-# Local Task Manager
+# UniToDo
 
 仕事と私用を一括評価し、「今やること」を1件だけ返すWindows専用タスク管理システムです。.NET 10、ASP.NET Core、SQLite、常駐トレイ、`taskctl`で構成され、タスク・自由活動の作業時間もローカルへ記録します。OpenAI API、Apps Script、外部サーバーは使いません。
 
-AI・開発者向けの設計資料は[Task Manager設計Vault](docs/TaskManager-Vault/00_入口.md)にあります。Obsidianでは`docs/TaskManager-Vault`を専用Vaultとして開きます。
+利用者向けの正式名称は「UniToDo」です。互換性維持のため、実行ファイル、ソリューション、名前空間、保存先などの開発上の名前は`TaskManager`のままです。
+
+AI・開発者向けの設計資料は[UniToDo設計Vault](docs/TaskManager-Vault/00_入口.md)にあります。Obsidianでは`docs/TaskManager-Vault`を専用Vaultとして開きます。
 
 ## ライセンス
 
@@ -50,7 +52,7 @@ dotnet --list-sdks
 .\scripts\install.ps1
 ```
 
-インストール先は`%LOCALAPPDATA%\Programs\TaskManager`、データ保存先は`%LOCALAPPDATA%\TaskManager`です。ログオン時に監視親を起動するWindowsタスクとユーザーPATHが設定され、`http://127.0.0.1:48120`だけで待ち受けます。
+インストール先は`%LOCALAPPDATA%\Programs\TaskManager`、データ保存先は`%LOCALAPPDATA%\TaskManager`です。デスクトップには`UniToDo`ショートカット、ログオン時の自動起動にはWindowsタスク`UniToDo Watchdog`が設定され、`http://127.0.0.1:48120`だけで待ち受けます。
 
 ## 他の人への直接頒布
 
@@ -80,11 +82,11 @@ TypeWhisperを終了し、最初に`-WhatIf`で変更対象を確認してから
 .\scripts\install-typewhisper-integration.ps1
 ```
 
-設定画面で送信先CodexタスクIDを指定すると、利用者はF13で録音を開始・停止し、校正本文を確認・編集して送信できます。Task ManagerはTypeWhisperのループバックAPIで「音声校正」ワークフローを直接開始・停止します。API起動と選択モデルのダウンロード済み状態を確認した後、録音開始API内で認識モデルを遅延ロードし、実際の録音開始を確認してから表示を進めます。F14開始とF15停止は手動操作用の予備経路として残します。Ollamaの起動とモデルロードは録音と並行し、録音停止後は対象モデルのロード完了を確認してから本文をOllamaへ渡します。Codex CLIはGit管理外の常駐アプリ配置先から起動するため、この送信経路だけリポジトリ検査を省略します。サンドボックスと承認設定は維持します。構成、データ保護、CLI送信、テスト、障害対応は[音声入力設計](docs/TaskManager-Vault/07_音声入力.md)を参照してください。
+設定画面で送信先CodexタスクIDを指定すると、利用者はF13で録音を開始・停止し、校正本文を確認・編集して送信できます。UniToDoはTypeWhisperのループバックAPIで「音声校正」ワークフローを直接開始・停止します。API起動と選択モデルのダウンロード済み状態を確認した後、録音開始API内で認識モデルを遅延ロードし、実際の録音開始を確認してから表示を進めます。F14開始とF15停止は手動操作用の予備経路として残します。Ollamaの起動とモデルロードは録音と並行し、録音停止後は対象モデルのロード完了を確認してから本文をOllamaへ渡します。Codex CLIはGit管理外の常駐アプリ配置先から起動するため、この送信経路だけリポジトリ検査を省略します。サンドボックスと承認設定は維持します。構成、データ保護、CLI送信、テスト、障害対応は[音声入力設計](docs/TaskManager-Vault/07_音声入力.md)を参照してください。
 
 ## 初回設定
 
-1. `TaskManager.exe`を起動し、ダッシュボードを開きます。
+1. デスクトップの`UniToDo`ショートカットを開きます（実行ファイル名は`TaskManager.exe`のままです）。
 2. 「設定」で活動時間、作業時間、優先度係数、通知、Codex音声入力の送信先タスクIDを確認します。
 3. Google CloudでCalendar APIを有効にし、デスクトップアプリ用OAuthクライアントの`credentials.json`を取得します。
 4. 「設定」からJSONを登録し、「Google Calendarに接続」を押します。要求権限は`calendar.readonly`のみです。

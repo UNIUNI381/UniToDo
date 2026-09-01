@@ -59,12 +59,12 @@ if ($matches.Count -ne 1) { throw "対象IDの一致件数が不正です。" }
 
 ## 手動バックアップ
 
-完全削除など、復元が難しい変更の直前に限り、Task ManagerのループバックAPIでオンラインバックアップを作成する。タスク、プロジェクト、作業時間の操作にはこのAPIを使わない。
+完全削除など、復元が難しい変更の直前に限り、UniToDoのループバックAPIでオンラインバックアップを作成する。タスク、プロジェクト、作業時間の操作にはこのAPIを使わない。
 
 ```powershell
 $backupResult = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:48120/api/v1/backup"
 if ([string]::IsNullOrWhiteSpace([string]$backupResult.backupPath)) {
-    throw "Task Managerの手動バックアップを確認できませんでした。"
+    throw "UniToDoの手動バックアップを確認できませんでした。"
 }
 ```
 

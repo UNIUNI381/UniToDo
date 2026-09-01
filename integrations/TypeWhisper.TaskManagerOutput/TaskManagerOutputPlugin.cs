@@ -21,7 +21,7 @@ public sealed class TaskManagerOutputPlugin : ITypeWhisperPlugin, IActionPlugin
     public string PluginId => "com.local.codex-thread-output";
 
     /// <summary>プラグインの表示名を取得する。</summary>
-    public string PluginName => "Task Manager Review Output";
+    public string PluginName => "UniToDo Review Output";
 
     /// <summary>プラグインのバージョンを取得する。</summary>
     public string PluginVersion => "2.0.0";
@@ -30,7 +30,7 @@ public sealed class TaskManagerOutputPlugin : ITypeWhisperPlugin, IActionPlugin
     public string ActionId => "codex-thread-output";
 
     /// <summary>出力アクションの表示名を取得する。</summary>
-    public string ActionName => "Task Managerで確認";
+    public string ActionName => "UniToDoで確認";
 
     /// <summary>出力アクションのアイコンを取得する。</summary>
     public string ActionIcon => "message-square";
@@ -89,12 +89,12 @@ public sealed class TaskManagerOutputPlugin : ITypeWhisperPlugin, IActionPlugin
             request.Headers.Add("X-TaskManager-Source", "TypeWhisper");
             using HttpResponseMessage response = await httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
-            hostServices?.Log(PluginLogLevel.Info, "校正済み音声入力をTask Managerの確認待ちへ追加しました。");
-            return new ActionResult(true, "Task Managerで確認してください。", null, ActionIcon, 2);
+            hostServices?.Log(PluginLogLevel.Info, "校正済み音声入力をUniToDoの確認待ちへ追加しました。");
+            return new ActionResult(true, "UniToDoで確認してください。", null, ActionIcon, 2);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return new ActionResult(false, "Task Managerへの転送を中止しました。", null, null, 3);
+            return new ActionResult(false, "UniToDoへの転送を中止しました。", null, null, 3);
         }
         catch (Exception transferError)
         {
@@ -102,13 +102,13 @@ public sealed class TaskManagerOutputPlugin : ITypeWhisperPlugin, IActionPlugin
             try
             {
                 SetClipboardText(text);
-                hostServices?.Log(PluginLogLevel.Error, $"Task Manager転送に失敗し、本文をクリップボードへ退避しました: {transferError.Message}");
-                return new ActionResult(false, "Task Managerへ接続できないため、本文をクリップボードへコピーしました。", null, null, 4);
+                hostServices?.Log(PluginLogLevel.Error, $"UniToDo転送に失敗し、本文をクリップボードへ退避しました: {transferError.Message}");
+                return new ActionResult(false, "UniToDoへ接続できないため、本文をクリップボードへコピーしました。", null, null, 4);
             }
             catch (Exception clipboardError)
             {
-                hostServices?.Log(PluginLogLevel.Error, $"Task Manager転送とクリップボード退避に失敗しました: {clipboardError.Message}");
-                return new ActionResult(false, "Task Managerへの転送とクリップボード退避に失敗しました。", null, null, 4);
+                hostServices?.Log(PluginLogLevel.Error, $"UniToDo転送とクリップボード退避に失敗しました: {clipboardError.Message}");
+                return new ActionResult(false, "UniToDoへの転送とクリップボード退避に失敗しました。", null, null, 4);
             }
         }
     }

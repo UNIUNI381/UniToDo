@@ -31,7 +31,7 @@ public sealed class CodexReviewForm : Form
         reviewItem = item;
         sendAction = sendReviewAction;
         discardAction = discardReviewAction;
-        Text = "音声入力を確認";
+        Text = $"{TaskConstants.ApplicationDisplayName} - 音声入力を確認";
         StartPosition = FormStartPosition.Manual;
         MinimumSize = new Size(640, 420);
         Size = new Size(760, 520);

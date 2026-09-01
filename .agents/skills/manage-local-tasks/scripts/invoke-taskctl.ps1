@@ -18,7 +18,7 @@ function Find-TaskControlExecutable {
         return $availableCommand.Source
     }
 
-    throw "taskctl was not found. Install Task Manager first."
+    throw "taskctl was not found. Install UniToDo first."
 }
 
 # 任意の作業フォルダーからインストール済みCLIを呼び出して終了コードを維持する。

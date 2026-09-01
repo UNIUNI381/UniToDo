@@ -531,7 +531,7 @@ public sealed class CliRunner
                 }
             }
         }
-        throw new InvalidOperationException("ローカルタスク管理アプリが起動していません。");
+        throw new InvalidOperationException($"{TaskConstants.ApplicationDisplayName}が起動していません。");
     }
 
     /// <summary>登録済みWindowsタスクからCodexの実行ジョブ外へ監視親を起動する。</summary>

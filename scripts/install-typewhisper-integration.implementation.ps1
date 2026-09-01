@@ -49,7 +49,7 @@ function Assert-TypeWhisperIntegrationPrerequisites {
         throw "Ollama校正スクリプトの配布元が見つかりません: $ollamaScriptSourcePath"
     }
     if (-not (Test-Path -LiteralPath $taskManagerExecutable -PathType Leaf)) {
-        throw "インストール済みTask Managerが見つかりません: $taskManagerExecutable"
+        throw "インストール済みUniToDoが見つかりません: $taskManagerExecutable"
     }
     if (-not (Test-Path -LiteralPath $codexExecutable -PathType Leaf)) {
         throw "外部プロセスから実行可能なCodex CLIが見つかりません。公式Windowsインストーラーで導入してください: powershell -ExecutionPolicy ByPass -c `"irm https://chatgpt.com/codex/install.ps1 | iex`""
@@ -203,4 +203,4 @@ Install-TypeWhisperOutputPlugin
 Update-TypeWhisperHotkeys
 Update-TypeWhisperWorkflows
 Write-Output "TypeWhisper integration installed. Backup: $backupDirectory"
-Write-Output "Task Managerを起動し、F13でTypeWhisper APIによる音声校正を開始してください。"
+Write-Output "UniToDoを起動し、F13でTypeWhisper APIによる音声校正を開始してください。"

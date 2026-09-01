@@ -4,7 +4,7 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "common.ps1")
 
 function New-TaskManagerShortcut {
-    # Task Managerを起動するWindowsショートカットを作成する。 ASCII.
+    # UniToDoを起動するWindowsショートカットを作成する。 ASCII.
     param(
         [Parameter(Mandatory = $true)][string]$ShortcutPath,
         [Parameter(Mandatory = $true)][string]$ExecutablePath,
@@ -38,7 +38,7 @@ function Register-TaskManagerWatchdog {
     param([Parameter(Mandatory = $true)][string]$ExecutablePath)
 
     # ログオン起動、外側の再起動、重複防止をWindowsタスクへ設定する。 ASCII.
-    $scheduledTaskName = "LocalTaskManager Watchdog"
+    $scheduledTaskName = "UniToDo Watchdog"
     $scheduledTaskUser = "$env:USERDOMAIN\$env:USERNAME"
     $scheduledTaskAction = New-ScheduledTaskAction -Execute $ExecutablePath -Argument "--watchdog" -WorkingDirectory (Split-Path -Parent $ExecutablePath)
     $scheduledTaskTrigger = New-ScheduledTaskTrigger -AtLogOn -User $scheduledTaskUser
@@ -60,7 +60,7 @@ function Register-TaskManagerWatchdog {
         -Trigger $scheduledTaskTrigger `
         -Settings $scheduledTaskSettings `
         -Principal $scheduledTaskPrincipal `
-        -Description "Local Task Manager watchdog" `
+        -Description "UniToDo automatic startup and recovery" `
         -Force | Out-Null
 }
 
@@ -97,21 +97,32 @@ if (-not $SkipPublish) {
 $publishDirectory = Join-Path $ProjectRoot "artifacts\publish\TaskManager"
 $installDirectory = Join-Path $env:LOCALAPPDATA "Programs\TaskManager"
 $applicationExecutable = Join-Path $installDirectory "TaskManager.exe"
-# 更新中にWindows側の再起動が割り込まないよう登録済みタスクを先に停止する。 ASCII.
-Stop-ScheduledTask -TaskName "LocalTaskManager Watchdog" -ErrorAction SilentlyContinue
+# 更新中にWindows側の再起動が割り込まないよう新旧の登録済みタスクを停止し、旧名だけを解除する。 ASCII.
+$scheduledTaskName = "UniToDo Watchdog"
+$legacyScheduledTaskName = "LocalTaskManager Watchdog"
+foreach ($registeredTaskName in @($scheduledTaskName, $legacyScheduledTaskName)) {
+    Stop-ScheduledTask -TaskName $registeredTaskName -ErrorAction SilentlyContinue
+}
+Unregister-ScheduledTask -TaskName $legacyScheduledTaskName -Confirm:$false -ErrorAction SilentlyContinue
 Stop-InstalledTaskManager -ExecutablePath $applicationExecutable
 New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
 Copy-Item -Path (Join-Path $publishDirectory "*") -Destination $installDirectory -Recurse -Force
 $startupDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 $desktopDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
-$startupShortcut = Join-Path $startupDirectory "TaskManager.lnk"
-if (Test-Path -LiteralPath $startupShortcut) {
-    # 旧ショートカットとの二重起動を避け、タスクスケジューラへ一本化する。 ASCII.
-    Remove-Item -LiteralPath $startupShortcut -Force
+$legacyShortcutName = "TaskManager.lnk"
+$applicationShortcutName = "UniToDo.lnk"
+foreach ($startupShortcutName in @($legacyShortcutName, $applicationShortcutName)) {
+    $startupShortcut = Join-Path $startupDirectory $startupShortcutName
+    if (Test-Path -LiteralPath $startupShortcut) {
+        # スタートアップショートカットとの二重起動を避け、タスクスケジューラへ一本化する。 ASCII.
+        Remove-Item -LiteralPath $startupShortcut -Force
+    }
 }
-New-TaskManagerShortcut -ShortcutPath (Join-Path $desktopDirectory "TaskManager.lnk") -ExecutablePath $applicationExecutable
+$legacyDesktopShortcut = Join-Path $desktopDirectory $legacyShortcutName
+Remove-Item -LiteralPath $legacyDesktopShortcut -Force -ErrorAction SilentlyContinue
+New-TaskManagerShortcut -ShortcutPath (Join-Path $desktopDirectory $applicationShortcutName) -ExecutablePath $applicationExecutable
 Register-TaskManagerWatchdog -ExecutablePath $applicationExecutable
 Add-UserPathEntry -DirectoryPath $installDirectory
-Start-ScheduledTask -TaskName "LocalTaskManager Watchdog"
-Write-Output "Installed to: $installDirectory"
+Start-ScheduledTask -TaskName $scheduledTaskName
+Write-Output "UniToDo installed to: $installDirectory"
 Write-Output "taskctl is available from newly opened terminals."

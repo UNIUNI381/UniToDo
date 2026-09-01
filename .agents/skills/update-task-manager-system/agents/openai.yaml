@@ -1,4 +1,4 @@
 interface:
-  display_name: "Task Managerシステム更新"
+  display_name: "UniToDoシステム更新"
   short_description: "実装・Vault・ローカルGitを同じ変更単位で同期します"
-  default_prompt: "$update-task-manager-systemを使って、Task Managerの変更を実装し、VaultとGit管理まで整合させてください。"
+  default_prompt: "$update-task-manager-systemを使って、UniToDoの変更を実装し、VaultとGit管理まで整合させてください。"

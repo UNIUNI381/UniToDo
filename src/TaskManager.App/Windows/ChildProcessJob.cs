@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using TaskManager.Domain;
 using Microsoft.Win32.SafeHandles;
 
 namespace TaskManager.Windows;
@@ -48,7 +49,7 @@ internal sealed class ChildProcessJob : IDisposable
         if (!AssignProcessToJobObject(jobHandle, applicationProcess.Handle))
         {
             throw new InvalidOperationException(
-                "Task Manager本体を監視対象用Windows Jobへ登録できませんでした。",
+                $"{TaskConstants.ApplicationDisplayName}本体を監視対象用Windows Jobへ登録できませんでした。",
                 new Win32Exception(Marshal.GetLastWin32Error()));
         }
     }

@@ -26,6 +26,7 @@ public static class Program
     public static async Task<int> Main()
     {
         // 中核ロジック、保存層、自動処理、性能をまとめて検証する。
+        await RunTestAsync("正式表示名と内部識別子を分離する", TestApplicationDisplayNameAsync);
         await RunTestAsync("空き時間15分未満では推薦しない", TestMinimumSlotAsync);
         await RunTestAsync("待機中も優先度を保存し強制表示できる", TestWaitingPriorityAndForcedRecommendationAsync);
         await RunTestAsync("依存タスク未完了を除外する", TestDependencyBlockingAsync);
@@ -99,6 +100,15 @@ public static class Program
         await RunTestAsync("5000件をSQLite込み300ミリ秒以内に再計算する", TestPersistentPerformanceAsync);
         Console.WriteLine($"結果: {passedCount}件成功 / {failedCount}件失敗");
         return failedCount == 0 ? 0 : 1;
+    }
+
+    /// <summary>利用者向け名称と互換性用の監視タスク名を検証する。</summary>
+    private static Task TestApplicationDisplayNameAsync()
+    {
+        // 正式名称と利用者が確認するWindowsタスク名を同じブランドへ統一する。
+        Assert(TaskConstants.ApplicationDisplayName == "UniToDo", "正式表示名がUniToDoではありません。");
+        Assert(TaskConstants.WatchdogScheduledTaskName == "UniToDo Watchdog", "監視タスクの表示名がUniToDoではありません。");
+        return Task.CompletedTask;
     }
 
     /// <summary>1件のテストを実行して結果を記録する。</summary>

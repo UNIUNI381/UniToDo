@@ -86,7 +86,7 @@ public sealed class GoogleCalendarService(
             using CalendarService calendarService = new(new BaseClientService.Initializer
             {
                 HttpClientInitializer = credential,
-                ApplicationName = "Local Task Manager"
+                ApplicationName = TaskConstants.ApplicationDisplayName
             });
             TaskManagerSettings settings = await repository.GetSettingsAsync(cancellationToken);
             DateTimeOffset currentTime = clock.GetLocalNow();

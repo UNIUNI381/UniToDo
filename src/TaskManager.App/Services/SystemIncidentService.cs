@@ -29,7 +29,7 @@ public sealed class SystemIncidentService(TaskManagerPaths paths, TimeProvider t
             OccurredAt = currentTime,
             ExitCode = exitCode,
             RestartCount = restartCount,
-            Message = "Task Manager本体が異常終了しました。",
+            Message = $"{TaskConstants.ApplicationDisplayName}本体が異常終了しました。",
             CrashLogPath = File.Exists(crashLogPath) ? crashLogPath : string.Empty,
             RecoveryLogPath = recoveryLogPath
         };

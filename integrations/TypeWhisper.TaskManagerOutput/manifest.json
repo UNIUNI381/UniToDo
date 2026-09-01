@@ -1,9 +1,9 @@
 {
   "id": "com.local.codex-thread-output",
-  "name": "Task Manager Review Output",
+  "name": "UniToDo Review Output",
   "version": "2.0.0",
   "author": "Local",
-  "description": "Send processed dictation to the local Task Manager review window",
+  "description": "Send processed dictation to the local UniToDo review window",
   "assemblyName": "TypeWhisper.TaskManagerOutput.dll",
   "pluginClass": "TypeWhisper.Plugin.TaskManagerOutput.TaskManagerOutputPlugin"
 }

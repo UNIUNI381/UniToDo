@@ -30,7 +30,7 @@
 - 変更後は `scripts/test.ps1` を実行し、必要な発行・インストールで現環境へ反映する。第三者配布用ZIPは、ユーザーが頒布版の生成を明示した場合だけ生成する。
 - OpenAI API、Apps Script、Google Sheets同期、外部公開用サーバーを追加しない。
 - Webサーバーの待受先を `127.0.0.1:48120` 以外へ広げない。
-- ローカルTask Manager本体のGoogle Calendar API連携は `calendar.readonly` 以外の権限を要求しない。この制約はローカルアプリの同期機能だけに適用する。
+- ローカルUniToDo本体（開発名`TaskManager`）のGoogle Calendar API連携は `calendar.readonly` 以外の権限を要求しない。この制約はローカルアプリの同期機能だけに適用する。
 - ユーザーがGoogle Calendarへの予定作成・更新・削除を明示した場合、接続済みのGoogle Calendarプラグインを使用できる。プラグインの権限をローカルアプリの `calendar.readonly` と混同しない。
 
 ## データ保護

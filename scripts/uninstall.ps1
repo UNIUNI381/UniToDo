@@ -30,17 +30,22 @@ if ($installDirectory -ne $expectedDirectory) {
     throw "Unexpected uninstall path: $installDirectory"
 }
 
-# 削除中の再起動とログオン後の起動失敗を防ぐため監視タスクを先に解除する。 ASCII.
-$scheduledTaskName = "LocalTaskManager Watchdog"
-Stop-ScheduledTask -TaskName $scheduledTaskName -ErrorAction SilentlyContinue
-Unregister-ScheduledTask -TaskName $scheduledTaskName -Confirm:$false -ErrorAction SilentlyContinue
+# 削除中の再起動とログオン後の起動失敗を防ぐため新旧の監視タスクを先に解除する。 ASCII.
+$scheduledTaskNames = @("UniToDo Watchdog", "LocalTaskManager Watchdog")
+foreach ($scheduledTaskName in $scheduledTaskNames) {
+    Stop-ScheduledTask -TaskName $scheduledTaskName -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName $scheduledTaskName -Confirm:$false -ErrorAction SilentlyContinue
+}
 Stop-InstalledTaskManager -ExecutablePath (Join-Path $installDirectory "TaskManager.exe")
-$startupShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)) "TaskManager.lnk"
-$desktopShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)) "TaskManager.lnk"
-Remove-Item -LiteralPath $startupShortcut -Force -ErrorAction SilentlyContinue
-Remove-Item -LiteralPath $desktopShortcut -Force -ErrorAction SilentlyContinue
+$shortcutNames = @("UniToDo.lnk", "TaskManager.lnk")
+foreach ($shortcutName in $shortcutNames) {
+    $startupShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)) $shortcutName
+    $desktopShortcut = Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)) $shortcutName
+    Remove-Item -LiteralPath $startupShortcut -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $desktopShortcut -Force -ErrorAction SilentlyContinue
+}
 Remove-UserPathEntry -DirectoryPath $installDirectory
 if (Test-Path -LiteralPath $installDirectory) {
     Remove-Item -LiteralPath $installDirectory -Recurse -Force
 }
-Write-Output "The application was removed. Data remains under $env:LOCALAPPDATA\TaskManager."
+Write-Output "UniToDo was removed. Data remains under $env:LOCALAPPDATA\TaskManager."

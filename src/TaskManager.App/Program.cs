@@ -151,7 +151,7 @@ public static class Program
         {
             // 重要通知設定にかかわらず、自動復旧をユーザーへ一度だけ知らせる。
             tray.Notify(
-                "Task Managerを自動復旧しました",
+                $"{TaskConstants.ApplicationDisplayName}を自動復旧しました",
                 "異常終了を検出しました。ダッシュボードでエラー情報を確認し、必要に応じてCodexへ共有してください。");
         }
         if (!arguments.Contains("--background", StringComparer.OrdinalIgnoreCase))
@@ -281,10 +281,10 @@ public static class Program
     {
         // Webサーバーが起動できない状態でもユーザーが障害へ気づける表示手段を確保する。
         System.Windows.Forms.MessageBox.Show(
-            "Task Managerの起動に3回連続で失敗しました。\n"
+            $"{TaskConstants.ApplicationDisplayName}の起動に3回連続で失敗しました。\n"
             + "ログフォルダーを確認し、Codexへ修正を依頼してください。\n\n"
             + "%LOCALAPPDATA%\\TaskManager\\logs",
-            "Task Managerを起動できません",
+            $"{TaskConstants.ApplicationDisplayName}を起動できません",
             MessageBoxButtons.OK,
             MessageBoxIcon.Error);
     }

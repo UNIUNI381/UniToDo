@@ -317,7 +317,7 @@ function renderSystemIncident(incident) {
   card.innerHTML = `
     <div class="system-incident-content">
       <span class="system-incident-label">SYSTEM ERROR</span>
-      <strong>Task Managerが異常終了し、自動復旧しました</strong>
+      <strong>UniToDoが異常終了し、自動復旧しました</strong>
       <p>${formatDateTime(incident.occurredAt)}に異常終了を検出し、${recoveredText}に復旧しました。終了コード：${escapeHtml(String(incident.exitCode))}</p>
       <small>ログ：${escapeHtml(logPath)}</small>
     </div>
@@ -356,7 +356,7 @@ function renderSystemIncident(incident) {
 function buildSystemIncidentSummary(incident) {
   // 識別子、時刻、終了コード、ログ場所を再調査に必要な最小情報として整形する。
   return [
-    "Task Managerの異常終了を修正してください。",
+    "UniToDoの異常終了を修正してください。",
     `インシデントID: ${incident.identifier}`,
     `発生日時: ${incident.occurredAt}`,
     `復旧日時: ${incident.recoveredAt || "未復旧"}`,

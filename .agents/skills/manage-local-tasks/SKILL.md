@@ -1,9 +1,9 @@
 ---
 name: manage-local-tasks
-description: WindowsローカルのTask Managerをtaskctl経由で安全に操作する。今やること、タスク、プロジェクト、AI下書き、作業タイマー、手入力ログ、集計を扱う依頼で、現在のCodexプロジェクトに関係なく使用する。
+description: WindowsローカルのUniToDoをtaskctl経由で安全に操作する。今やること、タスク、プロジェクト、AI下書き、作業タイマー、手入力ログ、集計を扱う依頼で、現在のCodexプロジェクトに関係なく使用する。
 ---
 
-# ローカルタスク管理
+# UniToDoタスク操作
 
 ## 基本規則
 
@@ -75,7 +75,7 @@ PowerShell 5.1では可能な限り一時`.ps1`を作らない。必要な場合
 
 ### Google Calendar
 
-- Task Manager本体の同期は空き時間計算用の読み取り専用とする。
+- UniToDo本体の同期は空き時間計算用の読み取り専用とする。
 - ユーザーが予定変更を明示した場合は、接続済みGoogle Calendarプラグインを使う。本体の`calendar.readonly`制約をプラグインへ適用しない。
 
 ### プロジェクト情報
@@ -84,5 +84,5 @@ PowerShell 5.1では可能な限り一時`.ps1`を作らない。必要な場合
 
 ## データ保護
 
-- 完全削除など、復元が難しい変更の直前にTask Managerの手動バックアップAPIを呼び、成功を確認する。手順は[references/commands.md](references/commands.md)の「手動バックアップ」を読む。
+- 完全削除など、復元が難しい変更の直前にUniToDoの手動バックアップAPIを呼び、成功を確認する。手順は[references/commands.md](references/commands.md)の「手動バックアップ」を読む。
 - DB、バックアップ、資格情報、OAuthトークンの内容をGit、文書、移行元ファイルへ書き出さない。
