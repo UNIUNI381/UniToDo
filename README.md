@@ -54,15 +54,17 @@ dotnet --list-sdks
 
 インストール先は`%LOCALAPPDATA%\Programs\TaskManager`、データ保存先は`%LOCALAPPDATA%\TaskManager`です。デスクトップには`UniToDo`ショートカット、ログオン時の自動起動にはWindowsタスク`UniToDo Watchdog`が設定され、`http://127.0.0.1:48120`だけで待ち受けます。
 
-## 他の人への直接頒布
+## GitHubからの入手と頒布
 
-利用・改良に必要なソース、自己完結ランタイム、Codex Skillをまとめ、個人データを検査したZIPを作成します。
+ソースコードはGitHubの公開リポジトリで提供し、利用者向けの自己完結型`win-x64`頒布物はGitHub Releasesで提供します。利用者は各Releaseに添付された`TaskManager-win-x64.zip`をダウンロードしてください。GitHubが自動生成する`Source code (zip)`と`Source code (tar.gz)`には発行済みランタイムが含まれないため、インストール用頒布物として使用しません。
+
+Releaseへ添付するZIPは、利用・改良に必要なソース、自己完結ランタイム、Codex Skillをまとめ、個人データを検査して作成します。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\create-distribution.ps1
 ```
 
-PowerShell 7が必要です。生成物は`artifacts/distribution`配下です。ワークスペースを手動でZIP化せず、必ずこのスクリプトを使用します。DB、バックアップ、資格情報、OAuthトークン、実タスク、作成者固有のCodexタスクIDは含まれません。発行済み依存関係と`licenses/dependencies.json`が一致しない場合や、必要なライセンス原文が欠けている場合はZIPを生成しません。
+PowerShell 7が必要です。生成物は`artifacts/distribution`配下です。ワークスペースを手動でZIP化せず、必ずこのスクリプトを使用します。DB、バックアップ、資格情報、OAuthトークン、実タスク、作成者固有のCodexタスクIDは含まれません。発行済み依存関係と`licenses/dependencies.json`が一致しない場合や、必要なライセンス原文が欠けている場合はZIPを生成しません。生成したZIPだけをGitHub Releaseの資産として添付します。
 
 受取人はZIPを展開し、展開ルートをCodexの作業フォルダーとして開いてから、`最初にお読みください.txt`のプロンプトをCodexへ入力します。Codexが`AGENTS.md`と設計Vaultを読み、環境確認、`Install.ps1`、タスク操作、開発準備を案内します。詳細は[頒布と受取人セットアップ](docs/TaskManager-Vault/08_頒布と受取人セットアップ.md)を参照してください。
 
