@@ -29,6 +29,13 @@ const applicationState = {
   calendarRefreshTimerIdentifier: null,
   // 長時間警告と自動停止を短い周期で反映するタイマーIDを保持する。
   timeTrackingRefreshTimerIdentifier: null,
+  // 変更通知の接続、遅延更新、画面固有の編集状態を保持する。
+  uiChangeClientIdentifier: createUiChangeClientIdentifier(),
+  uiChangeStream: null,
+  uiChangeRefreshTimerIdentifier: null,
+  uiChangeRefreshPending: false,
+  uiChangeRefreshInProgress: false,
+  settingsFormDirty: false,
   // 最新ダッシュボード応答をウィジェット操作で再利用する。
   dashboardResult: null,
   // 空き時間外でも推薦候補を一時表示するかを保持する。
@@ -87,7 +94,9 @@ async function initializeApplication() {
   document.getElementById("show-time-history").addEventListener("change", renderHistory);
   window.addEventListener("resize", scheduleDependencyGraphDrawing);
   document.addEventListener("toggle", handleDependencyPanelToggle, true);
-  document.addEventListener("visibilitychange", refreshDashboardWhenVisible);
+  document.addEventListener("visibilitychange", refreshApplicationWhenVisible);
+  document.addEventListener("close", applyPendingUiChangeAfterEditing, true);
+  document.getElementById("settings-form").addEventListener("input", markSettingsFormDirty);
   populateStatusSelectors();
   if (applicationState.elapsedTimeTimerIdentifier === null) {
     applicationState.elapsedTimeTimerIdentifier = window.setInterval(function updateTimedDisplays() {
@@ -110,9 +119,107 @@ async function initializeApplication() {
     await loadTasks();
     document.getElementById("service-status").classList.add("online");
     await restoreReloadedView();
+    initializeUiChangeMonitoring();
   } catch (error) {
     showNotice(error.message, true);
   }
+}
+
+/** 変更通知で画面自身を識別する一意な値を作成する。 */
+function createUiChangeClientIdentifier() {
+  // 対応ブラウザでは暗号学的UUIDを使い、古い環境だけ時刻と乱数へフォールバックする。
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+/** サーバーの変更通知ストリームを購読する。 */
+function initializeUiChangeMonitoring() {
+  // EventSourceの自動再接続を利用し、接続回復時にも表示中画面を整合させる。
+  if (applicationState.uiChangeStream) return;
+  const changeStream = new EventSource("/api/v1/changes");
+  applicationState.uiChangeStream = changeStream;
+  changeStream.addEventListener("ready", scheduleUiChangeRefresh);
+  changeStream.addEventListener("change", handleUiChangeNotification);
+  window.addEventListener("beforeunload", function closeUiChangeStream() {
+    // ページ終了時は再接続を試みず現在のストリームを閉じる。
+    changeStream.close();
+  }, { once: true });
+}
+
+/** 受信した変更通知が別クライアント由来なら画面更新を予約する。 */
+function handleUiChangeNotification(event) {
+  // 同じ画面の保存処理は既存の直後更新へ任せ、二重描画を防ぐ。
+  try {
+    const notification = JSON.parse(event.data);
+    if (notification.clientIdentifier === applicationState.uiChangeClientIdentifier) return;
+  } catch {
+    // 不完全な通知でも安全側として表示データを再取得する。
+  }
+  scheduleUiChangeRefresh();
+}
+
+/** 複数の変更通知を短時間にまとめて表示中画面の更新を予約する。 */
+function scheduleUiChangeRefresh() {
+  // タスク状態遷移で複数レコードが変わっても最後に1回だけ再取得する。
+  applicationState.uiChangeRefreshPending = true;
+  if (applicationState.uiChangeRefreshTimerIdentifier !== null) {
+    window.clearTimeout(applicationState.uiChangeRefreshTimerIdentifier);
+  }
+  applicationState.uiChangeRefreshTimerIdentifier = window.setTimeout(applyPendingUiChange, 300);
+}
+
+/** 編集を妨げない時点で予約済みの外部変更を表示へ反映する。 */
+async function applyPendingUiChange() {
+  // 非表示、ダイアログ編集中、設定未保存、既存更新中は次の安全な契機まで保留する。
+  applicationState.uiChangeRefreshTimerIdentifier = null;
+  if (!applicationState.uiChangeRefreshPending
+    || document.visibilityState !== "visible"
+    || document.querySelector("dialog[open]")
+    || (applicationState.activeView === "settings" && applicationState.settingsFormDirty)
+    || applicationState.uiChangeRefreshInProgress) {
+    return;
+  }
+  applicationState.uiChangeRefreshPending = false;
+  applicationState.uiChangeRefreshInProgress = true;
+  try {
+    await refreshActiveView();
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    applicationState.uiChangeRefreshInProgress = false;
+    if (applicationState.uiChangeRefreshPending) scheduleUiChangeRefresh();
+  }
+}
+
+/** 現在選択中の画面を変えずに必要なデータだけ再取得する。 */
+async function refreshActiveView() {
+  // 画面ごとの共有データ依存を満たす順序で読み込み、タブ選択と入力条件を維持する。
+  const viewName = applicationState.activeView;
+  if (viewName === "dashboard") await loadDashboard();
+  if (viewName === "tasks" || viewName === "drafts") {
+    await loadProjects();
+    await loadTasks();
+  }
+  if (viewName === "projects") await loadProjects();
+  if (viewName === "time") {
+    await loadProjects();
+    await loadTasks();
+    await loadTimeReport();
+  }
+  if (viewName === "settings") await loadSettings();
+  if (viewName === "history") await loadHistory();
+}
+
+/** ダイアログを閉じた後に保留中の外部変更を反映する。 */
+function applyPendingUiChangeAfterEditing() {
+  // closeイベントのDOM反映後に開いているダイアログを再確認する。
+  window.setTimeout(applyPendingUiChange, 0);
+}
+
+/** 設定フォームに未保存の利用者入力があることを記録する。 */
+function markSettingsFormDirty() {
+  // 自動更新で入力途中の設定を上書きしないため保存完了まで保持する。
+  applicationState.settingsFormDirty = true;
 }
 
 /** 現在表示中の画面名を保存してアプリを再読み込みする。 */
@@ -229,6 +336,9 @@ async function switchView(viewName) {
   if (viewName === "time") await loadTimeReport();
   if (viewName === "settings") await loadSettings();
   if (viewName === "history") await loadHistory();
+  if (applicationState.uiChangeRefreshPending) {
+    window.setTimeout(applyPendingUiChange, 0);
+  }
 }
 
 /** APIへJSONリクエストを送信する。 */
@@ -242,6 +352,7 @@ async function apiRequest(path, options = {}) {
   if (options.method && options.method !== "GET") {
     requestOptions.headers["X-TaskManager-Request"] = "local";
     requestOptions.headers["X-TaskManager-Source"] = "screen";
+    requestOptions.headers["X-TaskManager-Client"] = applicationState.uiChangeClientIdentifier;
   }
   const response = await fetch(path, requestOptions);
   const responseText = await response.text();
@@ -1066,11 +1177,12 @@ async function refreshVisibleDashboard() {
   }
 }
 
-/** ブラウザへ戻った時点でダッシュボードを更新する。 */
-async function refreshDashboardWhenVisible() {
-  // スリープ復帰やタブ復帰後の古い予定表示を解消する。
+/** ブラウザへ戻った時点で表示中画面を更新する。 */
+async function refreshApplicationWhenVisible() {
+  // スリープ復帰やSSE切断中の変更を選択タブを維持したまま整合させる。
   if (document.visibilityState === "visible") {
-    await refreshVisibleDashboard();
+    applicationState.uiChangeRefreshPending = true;
+    await applyPendingUiChange();
   }
 }
 
@@ -3313,6 +3425,10 @@ async function loadSettings() {
     if (!field) continue;
     if (field.type === "checkbox") field.checked = Boolean(fieldValue);
     else field.value = fieldValue;
+  }
+  applicationState.settingsFormDirty = false;
+  if (applicationState.uiChangeRefreshPending) {
+    window.setTimeout(applyPendingUiChange, 0);
   }
 }
 

@@ -5,7 +5,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
+using TaskManager.Api;
 using TaskManager.Cli;
 using TaskManager.Configuration;
 using TaskManager.Data;
@@ -27,6 +29,8 @@ public static class Program
     {
         // 中核ロジック、保存層、自動処理、性能をまとめて検証する。
         await RunTestAsync("正式表示名と内部識別子を分離する", TestApplicationDisplayNameAsync);
+        await RunTestAsync("画面変更を複数接続へ通知する", TestUiChangeNotifierAsync);
+        await RunTestAsync("成功したデータ更新APIだけを画面へ通知する", TestUiChangeNotificationMiddlewareAsync);
         await RunTestAsync("空き時間15分未満では推薦しない", TestMinimumSlotAsync);
         await RunTestAsync("待機中も優先度を保存し強制表示できる", TestWaitingPriorityAndForcedRecommendationAsync);
         await RunTestAsync("依存タスク未完了を除外する", TestDependencyBlockingAsync);
@@ -109,6 +113,70 @@ public static class Program
         Assert(TaskConstants.ApplicationDisplayName == "UniToDo", "正式表示名がUniToDoではありません。");
         Assert(TaskConstants.WatchdogScheduledTaskName == "UniToDo Watchdog", "監視タスクの表示名がUniToDoではありません。");
         return Task.CompletedTask;
+    }
+
+    /// <summary>同じデータ変更が待機中の全画面接続へ届くことを検証する。</summary>
+    private static async Task TestUiChangeNotifierAsync()
+    {
+        // 二つの待機接続を開始してから1件の変更を同じ連番で配信する。
+        UiChangeNotifier changeNotifier = new();
+        using CancellationTokenSource cancellationSource = new(TimeSpan.FromSeconds(2));
+        Task<UiChangeNotification> firstWait = changeNotifier.WaitForChangeAsync(
+            changeNotifier.CurrentVersion,
+            cancellationSource.Token);
+        Task<UiChangeNotification> secondWait = changeNotifier.WaitForChangeAsync(
+            changeNotifier.CurrentVersion,
+            cancellationSource.Token);
+        UiChangeNotification publishedNotification = changeNotifier.Publish("Codex", "client-a");
+        UiChangeNotification[] receivedNotifications = await Task.WhenAll(firstWait, secondWait);
+
+        Assert(publishedNotification.Version == 1, "最初の画面変更連番が1ではありません。");
+        Assert(
+            receivedNotifications.All(notification => notification == publishedNotification),
+            "待機中の全画面へ同じ変更通知が届きませんでした。");
+    }
+
+    /// <summary>正常終了した表示対象の更新APIだけが変更通知を発行することを検証する。</summary>
+    private static async Task TestUiChangeNotificationMiddlewareAsync()
+    {
+        // Codexのタスク更新を成功させ、操作元とクライアントIDが通知へ渡ることを確認する。
+        UiChangeNotifier changeNotifier = new();
+        RequestDelegate successfulRequest = context =>
+        {
+            // 正常終了した業務API応答を再現する。
+            context.Response.StatusCode = StatusCodes.Status200OK;
+            return Task.CompletedTask;
+        };
+        UiChangeNotificationMiddleware middleware = new(successfulRequest);
+        DefaultHttpContext taskContext = new();
+        taskContext.Request.Method = HttpMethods.Post;
+        taskContext.Request.Path = "/api/v1/tasks/task-1/actions/start";
+        taskContext.Request.Headers["X-TaskManager-Source"] = "Codex";
+        taskContext.Request.Headers["X-TaskManager-Client"] = "client-b";
+        await middleware.InvokeAsync(taskContext, changeNotifier);
+        Assert(changeNotifier.CurrentVersion == 1, "成功したタスク更新が画面へ通知されませんでした。");
+        using CancellationTokenSource cancellationSource = new(TimeSpan.FromSeconds(2));
+        UiChangeNotification notification = await changeNotifier.WaitForChangeAsync(0, cancellationSource.Token);
+        Assert(notification.Source == TaskConstants.CodexSource, "画面変更通知の操作元がCodexではありません。");
+        Assert(notification.ClientIdentifier == "client-b", "画面変更通知のクライアントIDが維持されませんでした。");
+
+        // 表示データを変えないCodex起動APIと失敗応答は通知連番を増やさない。
+        DefaultHttpContext excludedContext = new();
+        excludedContext.Request.Method = HttpMethods.Post;
+        excludedContext.Request.Path = "/api/v1/codex/task-thread/open";
+        await middleware.InvokeAsync(excludedContext, changeNotifier);
+        RequestDelegate failedRequest = context =>
+        {
+            // 入力エラーとなった更新API応答を再現する。
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            return Task.CompletedTask;
+        };
+        UiChangeNotificationMiddleware failedMiddleware = new(failedRequest);
+        DefaultHttpContext failedContext = new();
+        failedContext.Request.Method = HttpMethods.Put;
+        failedContext.Request.Path = "/api/v1/tasks/task-1";
+        await failedMiddleware.InvokeAsync(failedContext, changeNotifier);
+        Assert(changeNotifier.CurrentVersion == 1, "表示対象外または失敗したAPIが変更通知を発行しました。");
     }
 
     /// <summary>1件のテストを実行して結果を記録する。</summary>

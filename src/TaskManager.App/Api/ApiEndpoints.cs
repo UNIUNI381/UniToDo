@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using TaskManager.Data;
 using TaskManager.Domain;
@@ -10,12 +11,18 @@ namespace TaskManager.Api;
 /// <summary>ローカル画面とCLIで共有するHTTP APIを定義する。</summary>
 public static class ApiEndpoints
 {
+    // SSEのJSONを通常APIと同じcamelCaseで出力する設定を保持する。
+    private static readonly JsonSerializerOptions UiChangeJsonOptions = new(JsonSerializerDefaults.Web);
+    // 接続維持コメントを送信する間隔を保持する。
+    private static readonly TimeSpan UiChangeHeartbeatInterval = TimeSpan.FromSeconds(15);
+
     /// <summary>すべてのバージョン1 APIをアプリへ登録する。</summary>
     public static void MapTaskManagerApi(this WebApplication application)
     {
         // 読取、更新、カレンダー、保全の経路を機能別に登録する。
         RouteGroupBuilder api = application.MapGroup("/api/v1");
         api.MapGet("/health", GetHealth);
+        api.MapGet("/changes", StreamUiChangesAsync);
         api.MapGet("/system-incidents/pending", GetPendingSystemIncidentAsync);
         api.MapPost("/system-incidents/{identifier}/acknowledge", AcknowledgeSystemIncidentAsync);
         api.MapPost("/codex/task-thread/open", OpenTaskManagementThread);
@@ -68,6 +75,66 @@ public static class ApiEndpoints
     {
         // CLIの起動確認に必要な最小情報だけを返す。
         return Results.Ok(new { status = "ok", version = typeof(ApiEndpoints).Assembly.GetName().Version?.ToString() });
+    }
+
+    /// <summary>データ変更をServer-Sent Eventsで接続中の画面へ配信する。</summary>
+    private static async Task StreamUiChangesAsync(
+        HttpContext context,
+        UiChangeNotifier changeNotifier,
+        CancellationToken cancellationToken)
+    {
+        // 再接続可能な一方向ストリームとしてキャッシュと中間バッファを無効化する。
+        context.Response.ContentType = "text/event-stream";
+        context.Response.Headers.CacheControl = "no-cache";
+        context.Response.Headers["X-Accel-Buffering"] = "no";
+        long observedVersion = changeNotifier.CurrentVersion;
+        await WriteUiChangeEventAsync(
+            context.Response,
+            "ready",
+            new { version = observedVersion },
+            cancellationToken);
+
+        // 変更時は直ちに配信し、無変更時も定期コメントで接続を維持する。
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            using CancellationTokenSource heartbeatCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            heartbeatCancellation.CancelAfter(UiChangeHeartbeatInterval);
+            try
+            {
+                UiChangeNotification notification = await changeNotifier.WaitForChangeAsync(
+                    observedVersion,
+                    heartbeatCancellation.Token);
+                observedVersion = notification.Version;
+                await WriteUiChangeEventAsync(
+                    context.Response,
+                    "change",
+                    notification,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                await context.Response.WriteAsync(": keep-alive\n\n", cancellationToken);
+                await context.Response.Body.FlushAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+        }
+    }
+
+    /// <summary>SSEイベントを1件JSON形式で書き込み直ちに送信する。</summary>
+    private static async Task WriteUiChangeEventAsync(
+        HttpResponse response,
+        string eventName,
+        object payload,
+        CancellationToken cancellationToken)
+    {
+        // イベント名と1行JSONをSSEの空行区切りで出力する。
+        string serializedPayload = JsonSerializer.Serialize(payload, UiChangeJsonOptions);
+        await response.WriteAsync($"event: {eventName}\ndata: {serializedPayload}\n\n", cancellationToken);
+        await response.Body.FlushAsync(cancellationToken);
     }
 
     /// <summary>ユーザーがまだ確認していない最新の異常終了情報を返す。</summary>

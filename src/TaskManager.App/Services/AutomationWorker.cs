@@ -8,11 +8,13 @@ namespace TaskManager.Services;
 public sealed class AutomationWorker(
     IServiceProvider serviceProvider,
     TaskManagerTray taskManagerTray,
+    UiChangeNotifier uiChangeNotifier,
     ILogger<AutomationWorker> logger) : BackgroundService
 {
-    // スコープ生成元、通知先、ログを保持する。
+    // スコープ生成元、通知先、画面変更通知、ログを保持する。
     private readonly IServiceProvider services = serviceProvider;
     private readonly TaskManagerTray tray = taskManagerTray;
+    private readonly UiChangeNotifier changeNotifier = uiChangeNotifier;
     private readonly ILogger<AutomationWorker> applicationLogger = logger;
     private DateTimeOffset lastCalendarAttempt = DateTimeOffset.MinValue;
 
@@ -46,6 +48,7 @@ public sealed class AutomationWorker(
         TaskService taskService = serviceScope.ServiceProvider.GetRequiredService<TaskService>();
         TaskManagerSettings settings = await repository.GetSettingsAsync(cancellationToken);
         DateTimeOffset currentTime = DateTimeOffset.Now;
+        bool userInterfaceChanged = false;
 
         if (calendarService.IsBackgroundSynchronizationReady()
             && currentTime - lastCalendarAttempt >= TimeSpan.FromMinutes(5))
@@ -54,6 +57,7 @@ public sealed class AutomationWorker(
             try
             {
                 await calendarService.SynchronizeAsync(false, cancellationToken);
+                userInterfaceChanged = true;
             }
             catch (Exception synchronizationError)
             {
@@ -63,11 +67,23 @@ public sealed class AutomationWorker(
 
         TimeTrackingAutomationResult timeTrackingResult =
             await taskService.ProcessTimeEntryWarningsAsync(cancellationToken);
+        userInterfaceChanged = userInterfaceChanged
+            || timeTrackingResult.WarnedEntries.Count > 0
+            || timeTrackingResult.AutoStoppedEntries.Count > 0;
         SendTimeTrackingNotifications(timeTrackingResult, settings);
         RecommendationResult recommendation = await recommendationService.RefreshAsync(cancellationToken);
         await SendMorningNotificationAsync(repository, recommendation, settings, currentTime, cancellationToken);
-        await SendFollowUpNotificationsAsync(repository, settings, currentTime, cancellationToken);
+        userInterfaceChanged = await SendFollowUpNotificationsAsync(
+            repository,
+            settings,
+            currentTime,
+            cancellationToken) || userInterfaceChanged;
         await CreateDailyBackupAsync(repository, databaseInitializer, currentTime, cancellationToken);
+        if (userInterfaceChanged)
+        {
+            // バックグラウンド変更は特定画面由来ではないためクライアントIDを空で配信する。
+            changeNotifier.Publish(TaskConstants.SystemSource, string.Empty);
+        }
     }
 
     /// <summary>長時間タイマーの警告と自動停止をPC通知へ表示する。</summary>
@@ -121,7 +137,7 @@ public sealed class AutomationWorker(
     }
 
     /// <summary>確認期限を過ぎた実行中タスクを一度だけ通知する。</summary>
-    private async Task SendFollowUpNotificationsAsync(
+    private async Task<bool> SendFollowUpNotificationsAsync(
         TaskRepository repository,
         TaskManagerSettings settings,
         DateTimeOffset currentTime,
@@ -130,8 +146,9 @@ public sealed class AutomationWorker(
         // 続行時に新しい確認日時となるため日時を通知キーへ含める。
         if (!settings.NotificationsEnabled)
         {
-            return;
+            return false;
         }
+        bool taskChanged = false;
         List<ManagedTask> tasks = await repository.GetTasksAsync(cancellationToken);
         foreach (ManagedTask task in tasks.Where(task =>
             task.Status == TaskConstants.InProgressStatus
@@ -144,9 +161,11 @@ public sealed class AutomationWorker(
                 task.FollowUpNotifiedAt = currentTime;
                 task.UpdatedAt = currentTime;
                 await repository.SaveTaskAsync(task, "完了確認通知", TaskConstants.SystemSource, cancellationToken);
+                taskChanged = true;
                 tray.Notify("完了しましたか？", task.Title);
             }
         }
+        return taskChanged;
     }
 
     /// <summary>当日未作成ならSQLiteバックアップを作成する。</summary>

@@ -133,6 +133,7 @@ public static class Program
 
         WebApplication application = builder.Build();
         application.UseMiddleware<LocalRequestMiddleware>();
+        application.UseMiddleware<UiChangeNotificationMiddleware>();
         application.UseDefaultFiles();
         application.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = ConfigureStaticFileResponse });
         application.MapTaskManagerApi();
@@ -303,6 +304,7 @@ public static class Program
         services.AddSingleton<CalendarAvailabilityService>();
         services.AddSingleton<TaskValidationService>();
         services.AddSingleton<RecommendationService>();
+        services.AddSingleton<UiChangeNotifier>();
         services.AddSingleton<ProjectService>();
         services.AddSingleton<IDraftPostProcessingService, DraftPostProcessingService>();
         services.AddSingleton<TaskService>();

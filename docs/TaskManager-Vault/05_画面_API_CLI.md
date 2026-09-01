@@ -16,6 +16,7 @@
 
 画面は`wwwroot/index.html`、`app.js`、`styles.css`によるフレームワーク非依存の単一ページUIです。変更後は静的資産のクエリ版も更新します。
 左上のブランドアイコンは現在表示中のタブ名を一時保存して再読み込みし、読込完了後に同じタブへ戻します。
+APIまたは常駐処理が表示データを変更するとSSEで接続中の画面へ通知します。画面はページ全体を再読み込みせず、選択中のタブに必要なデータだけを再取得するため、タブ、絞り込み、作業時間の表示期間を維持します。同じ画面自身の保存通知はクライアントIDで除外し、ダイアログまたは未保存の設定を編集中なら閉じるか保存するまで外部変更の反映を保留します。ブラウザタブへ戻った時にも表示中のタブを再取得し、SSE切断中の変更を整合させます。
 
 F13音声入力はWebタブではなく、トレイ常駐プロセスの状態画面とWinForms確認画面を使用します。操作、表示状態、TypeWhisper連携は[音声入力](07_音声入力.md)を参照します。
 
@@ -25,7 +26,7 @@ F13音声入力はWebタブではなく、トレイ常駐プロセスの状態�
 
 | グループ | 主なパス | 用途 |
 |---|---|---|
-| 状態 | `/health`、`/dashboard`、`/system-incidents/pending`、`/system-incidents/{id}/acknowledge` | 稼働確認、推薦、カレンダーウィジェット、異常終了の確認 |
+| 状態 | `/health`、`/changes`、`/dashboard`、`/system-incidents/pending`、`/system-incidents/{id}/acknowledge` | 稼働確認、SSE変更通知、推薦、カレンダーウィジェット、異常終了の確認 |
 | タスク | `/tasks`、`/tasks/{id}/actions/{action}` | CRUDと状態操作 |
 | 作業時間 | `/time-entries`、`/time-entries/{id}/start`、`/time-reports` | タイマー、実行中ログの開始時刻修正、手入力、確認、無効化、集計 |
 | プロジェクト | `/projects`、`/projects/resolve`、`/projects/prepare` | 管理、名前解決、AI向け背景 |
