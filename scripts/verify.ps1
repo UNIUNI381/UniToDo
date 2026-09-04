@@ -154,6 +154,23 @@ function Assert-DistributionArchiveName {
     }
 }
 
+function Assert-RecipientSetupGuide {
+    # 受取人向け案内にCodexプロジェクト作成手順が揃っていることを確認する。 ASCII.
+    $setupGuidePath = Join-Path $ProjectRoot "最初にお読みください.txt"
+    $setupGuideSource = Get-Content -LiteralPath $setupGuidePath -Raw -Encoding UTF8
+    $requiredInstructions = @(
+        "UniToDo-win-x64.zip",
+        "新しいチャット",
+        "新しいプロジェクト",
+        "ソースフォルダ",
+        "UniToDo-win-x64フォルダー")
+    foreach ($requiredInstruction in $requiredInstructions) {
+        if ($setupGuideSource -notmatch [regex]::Escape($requiredInstruction)) {
+            throw "The recipient setup guide is missing a required instruction: $requiredInstruction"
+        }
+    }
+}
+
 function Assert-LicenseInventory {
     # 独自ライセンス表示と全lockファイルの第三者依存一覧が一致することを検査する。 ASCII.
     $requiredLicenseFiles = @(
@@ -274,5 +291,6 @@ Assert-WatchdogInstallation
 Assert-WatchdogUninstallation
 Assert-DistributionSecretExclusions
 Assert-DistributionArchiveName
+Assert-RecipientSetupGuide
 Assert-LicenseInventory
 Write-Output "Static verification passed."

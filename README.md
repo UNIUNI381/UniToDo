@@ -66,7 +66,7 @@ pwsh -NoProfile -File .\scripts\create-distribution.ps1
 
 PowerShell 7が必要です。生成物は`artifacts/distribution`配下です。ワークスペースを手動でZIP化せず、必ずこのスクリプトを使用します。DB、バックアップ、資格情報、OAuthトークン、実タスク、作成者固有のCodexタスクIDは含まれません。発行済み依存関係と`licenses/dependencies.json`が一致しない場合や、必要なライセンス原文が欠けている場合はZIPを生成しません。生成したZIPだけをGitHub Releaseの資産として添付します。
 
-受取人はZIPを展開し、展開ルートをCodexの作業フォルダーとして開いてから、`最初にお読みください.txt`のプロンプトをCodexへ入力します。Codexが`AGENTS.md`と設計Vaultを読み、環境確認、`Install.ps1`、タスク操作、開発準備を案内します。詳細は[頒布と受取人セットアップ](docs/TaskManager-Vault/08_頒布と受取人セットアップ.md)を参照してください。
+受取人は`UniToDo-win-x64.zip`を解凍して任意の場所へ配置し、Codexで「新しいチャット」→「新しいプロジェクト」を選択します。プロジェクト名を設定し、「ソースフォルダ」から解凍した`UniToDo-win-x64`フォルダーを選択してプロジェクトを作成した後、`最初にお読みください.txt`のプロンプトをCodexへ入力します。Codexが`AGENTS.md`と設計Vaultを読み、環境確認、`Install.ps1`、タスク操作、開発準備を案内します。詳細は[頒布と受取人セットアップ](docs/TaskManager-Vault/08_頒布と受取人セットアップ.md)を参照してください。
 
 ## 音声入力連携
 
