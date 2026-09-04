@@ -163,7 +163,7 @@ function Assert-RecipientSetupGuide {
         "新しいチャット",
         "新しいプロジェクト",
         "ソースフォルダ",
-        "UniToDo-win-x64フォルダー")
+        "UniToDo-win-x64 を選択")
     foreach ($requiredInstruction in $requiredInstructions) {
         if ($setupGuideSource -notmatch [regex]::Escape($requiredInstruction)) {
             throw "The recipient setup guide is missing a required instruction: $requiredInstruction"
