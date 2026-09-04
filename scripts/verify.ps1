@@ -145,6 +145,15 @@ function Assert-DistributionSecretExclusions {
     }
 }
 
+function Assert-DistributionArchiveName {
+    # 頒布ZIPの既定名が利用者向け名称と一致することを確認する。 ASCII.
+    $distributionScriptPath = Join-Path $ProjectRoot "scripts\create-distribution.ps1"
+    $distributionScriptSource = Get-Content -LiteralPath $distributionScriptPath -Raw -Encoding UTF8
+    if ($distributionScriptSource -notmatch '\[string\]\$DistributionName = "UniToDo-win-x64"') {
+        throw "The default distribution archive name must be UniToDo-win-x64.zip."
+    }
+}
+
 function Assert-LicenseInventory {
     # 独自ライセンス表示と全lockファイルの第三者依存一覧が一致することを検査する。 ASCII.
     $requiredLicenseFiles = @(
@@ -264,5 +273,6 @@ Assert-ApplicationDisplayName
 Assert-WatchdogInstallation
 Assert-WatchdogUninstallation
 Assert-DistributionSecretExclusions
+Assert-DistributionArchiveName
 Assert-LicenseInventory
 Write-Output "Static verification passed."

@@ -56,7 +56,7 @@ dotnet --list-sdks
 
 ## GitHubからの入手と頒布
 
-ソースコードはGitHubの公開リポジトリで提供し、利用者向けの自己完結型`win-x64`頒布物はGitHub Releasesで提供します。利用者は各Releaseに添付された`TaskManager-win-x64.zip`をダウンロードしてください。GitHubが自動生成する`Source code (zip)`と`Source code (tar.gz)`には発行済みランタイムが含まれないため、インストール用頒布物として使用しません。
+ソースコードはGitHubの公開リポジトリで提供し、利用者向けの自己完結型`win-x64`頒布物はGitHub Releasesで提供します。利用者は各Releaseに添付された`UniToDo-win-x64.zip`をダウンロードしてください。GitHubが自動生成する`Source code (zip)`と`Source code (tar.gz)`には発行済みランタイムが含まれないため、インストール用頒布物として使用しません。
 
 Releaseへ添付するZIPは、利用・改良に必要なソース、自己完結ランタイム、Codex Skillをまとめ、個人データを検査して作成します。
 

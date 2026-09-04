@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidatePattern('^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$')]
-    [string]$DistributionName = "TaskManager-win-x64"
+    [string]$DistributionName = "UniToDo-win-x64"
 )
 
 $ErrorActionPreference = "Stop"
