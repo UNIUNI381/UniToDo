@@ -131,6 +131,9 @@ public sealed class VoiceInputCoordinator(
     /// <summary>画面へ通知する準備状況の変更を公開する。</summary>
     public event Action<VoiceInputStatus>? StatusChanged;
 
+    /// <summary>実録音開始後に後段の事前準備を要求する。</summary>
+    public event Action? RecognitionStarted;
+
     /// <summary>TypeWhisperの準備完了後に録音を開始し、Ollamaを並行して準備する。</summary>
     public async Task StartAsync(CancellationToken cancellationToken)
     {
@@ -226,6 +229,7 @@ public sealed class VoiceInputCoordinator(
             }
             Volatile.Write(ref recordingActive, 1);
             PublishStatus("音声認識を開始しました", VoiceInputStatusKind.Success);
+            RecognitionStarted?.Invoke();
 
             // API応答の検証も完了させるが、表示とF13停止は実録音状態を正本にする。
             await startRequest;

@@ -61,6 +61,7 @@ public static class Program
         await RunTestAsync("音声状態表示を長文に合わせて拡張し上方へ配置する", TestVoiceInputStatusLayoutAsync);
         await RunTestAsync("Codex送信先未設定時にCLI起動を拒否する", TestCodexUnconfiguredDispatchAsync);
         await RunTestAsync("Codex CLIへ本文を標準入力で渡す", TestCodexCommandDispatchAsync);
+        await RunTestAsync("Codex事前起動を再利用し期限と送信先変更で回収する", TestCodexPreparationAsync);
         await RunTestAsync("Codex CLI失敗時に本文を確認待ちへ戻す", TestCodexSubmissionFailureAsync);
         await RunTestAsync("Codex CLI成功時の応答を詳細画面へ渡す", TestCodexSubmissionResponseDisplayAsync);
         await RunTestAsync("F13起動時にOllamaとTypeWhisperを必要時だけ起動する", TestVoiceInputDependencyStartupAsync);
@@ -1094,7 +1095,11 @@ public static class Program
             Text = "送信本文",
             CreatedAt = StandardTime()
         };
+        commandRunner.Prepare(threadIdentifier);
+        string[] preparedArguments = processExecutor.StartInformation!.ArgumentList.ToArray();
+        Assert(processExecutor.StandardInput.Length == 0, "確認前に本文が送られました。");
         CodexCommandResult result = await commandRunner.SendAsync(submission, CancellationToken.None);
+        Assert(preparedArguments.SequenceEqual(processExecutor.StartInformation!.ArgumentList), "事前起動と送信の設定が異なります。");
         Assert(result.IsSuccess, "偽Codex CLI送信が成功しませんでした。");
         Assert(
             string.Equals(Path.GetFileName(processExecutor.StartInformation?.FileName), "codex.exe", StringComparison.OrdinalIgnoreCase),
@@ -1125,6 +1130,86 @@ public static class Program
         Assert(
             !processExecutor.StartInformation!.ArgumentList.Contains(submission.Text),
             "本文がCLI引数へ混入しました。");
+    }
+
+    /// <summary>入力待機プロセスの再利用、回収、設定変更、取消しを検証する。</summary>
+    private static async Task TestCodexPreparationAsync()
+    {
+        // モデルを呼ばず、標準入力待ちのPowerShellをCLIの代役にする。
+        ProcessStartInfo information = CreateWaitingProcessInformation("first");
+        using CodexProcessPreparation preparation = new(TimeSpan.FromSeconds(1));
+        preparation.Prepare(information);
+        FieldInfo preparedField = typeof(CodexProcessPreparation).GetField("prepared", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        CodexPreparedProcess initial = (CodexPreparedProcess)preparedField.GetValue(preparation)!;
+        preparation.Prepare(information);
+        Assert(ReferenceEquals(initial, preparedField.GetValue(preparation)), "事前起動が重複しました。");
+        using CodexPreparedProcess first = preparation.TakeOrStart(information);
+        Assert(ReferenceEquals(initial, first), "送信時に別プロセスを起動しました。");
+        Assert(!first.Process.HasExited && !first.Output.IsCompleted, "本文なしで待機できませんでした。");
+        await first.Process.StandardInput.WriteAsync("confirmed");
+        first.Process.StandardInput.Close();
+        await first.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert((await first.Output).Trim() == "first:confirmed", "事前起動へ本文が届きませんでした。");
+
+        // 期限切れと早期終了後は新規プロセスで送信可能であることを検証する。
+        preparation.Prepare(information);
+        await Task.Delay(1500);
+        Assert(preparedField.GetValue(preparation) is null, "期限切れプロセスが保持されています。");
+        using CodexPreparedProcess afterTimeout = preparation.TakeOrStart(information);
+        Assert(!afterTimeout.Process.HasExited, "期限切れから通常起動へ戻れませんでした。");
+        preparation.Prepare(information);
+        using CodexPreparedProcess changed = preparation.TakeOrStart(CreateWaitingProcessInformation("second"));
+        await changed.Process.StandardInput.WriteAsync("text");
+        changed.Process.StandardInput.Close();
+        await changed.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        Assert((await changed.Output).Trim() == "second:text", "変更前の送信先プロセスが使われました。");
+
+        // 外部終了した待機プロセスを検出し、安全に再起動する。
+        preparation.Prepare(information);
+        CodexPreparedProcess exited = (CodexPreparedProcess)preparedField.GetValue(preparation)!;
+        exited.Stop();
+        await exited.Process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        using CodexPreparedProcess replacement = preparation.TakeOrStart(information);
+        Assert(!ReferenceEquals(exited, replacement) && !replacement.Process.HasExited, "早期終了から復帰しませんでした。");
+        preparation.Prepare(information);
+        preparation.Dispose();
+        Assert(preparedField.GetValue(preparation) is null, "終了時に待機プロセスが残りました。");
+
+        // 送信時の取消しで子プロセスが残らず、例外として戻ることを確認する。
+        using CodexProcessExecutor executor = new();
+        using CancellationTokenSource cancellation = new(TimeSpan.FromMilliseconds(200));
+        ProcessStartInfo slow = CreateWaitingProcessInformation("slow");
+        slow.ArgumentList[3] = "Start-Sleep -Seconds 30";
+        bool cancelled = false;
+        try
+        {
+            await executor.ExecuteAsync(slow, "text", cancellation.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            cancelled = true;
+        }
+        Assert(cancelled, "送信中の取消しが反映されませんでした。");
+    }
+
+    /// <summary>本文受信まで応答しないテスト用プロセス設定を構築する。</summary>
+    private static ProcessStartInfo CreateWaitingProcessInformation(string label)
+    {
+        // テスト固定文字列だけを引数に含め、送信本文は標準入力へ渡す。
+        ProcessStartInfo information = new()
+        {
+            FileName = "powershell.exe",
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        information.ArgumentList.Add("-NoProfile");
+        information.ArgumentList.Add("-NonInteractive");
+        information.ArgumentList.Add("-Command");
+        information.ArgumentList.Add($"[Console]::Write('{label}:' + [Console]::In.ReadToEnd())");
+        return information;
     }
 
     /// <summary>Codex CLI失敗後の再確認と通知を検証する。</summary>
@@ -1209,8 +1294,17 @@ public static class Program
         VoiceInputCoordinator coordinator = CreateVoiceInputCoordinator(voiceInputRuntime);
         List<VoiceInputStatus> statuses = [];
         coordinator.StatusChanged += statuses.Add;
+        bool preparationRequested = false;
+        coordinator.RecognitionStarted += () =>
+        {
+            // 録音開始確認とOllama未完了の時点でCLI準備が要求されることを確認する。
+            Assert(voiceInputRuntime.RecognitionStartCount == 1, "録音開始前にCLI準備が要求されました。");
+            Assert(!voiceInputRuntime.ModelLoadCompletion.Task.IsCompleted, "CLI準備がOllama完了を待っています。");
+            preparationRequested = true;
+        };
 
         await coordinator.StartAsync(CancellationToken.None);
+        Assert(preparationRequested, "録音開始後のCLI準備が要求されませんでした。");
 
         Assert(voiceInputRuntime.OllamaStartCount == 1, "未起動のOllamaが開始されませんでした。");
         Assert(voiceInputRuntime.TypeWhisperStartCount == 1, "未起動のTypeWhisperが開始されませんでした。");
@@ -2694,6 +2788,13 @@ public static class Program
         public ProcessStartInfo? StartInformation { get; private set; }
         public string StandardInput { get; private set; } = string.Empty;
 
+        /// <summary>本文なしの事前起動設定を記録する。</summary>
+        public void Prepare(ProcessStartInfo startInformation)
+        {
+            // 実プロセスは作成せず設定だけを比較に使う。
+            StartInformation = startInformation;
+        }
+
         /// <summary>プロセスを起動せず引数と標準入力を記録して成功を返す。</summary>
         public Task<CodexCommandResult> ExecuteAsync(
             ProcessStartInfo startInformation,
@@ -2712,6 +2813,12 @@ public static class Program
     {
         // すべての送信で返す固定結果を保持する。
         private readonly CodexCommandResult result = commandResult;
+
+        /// <summary>テストではCLIの事前起動を省略する。</summary>
+        public void Prepare(string threadIdentifier)
+        {
+            // ワーカーの固定結果だけを検証するため何も起動しない。
+        }
 
         /// <summary>外部プロセスを起動せず固定結果を返す。</summary>
         public Task<CodexCommandResult> SendAsync(

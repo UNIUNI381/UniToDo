@@ -52,6 +52,7 @@ public sealed class TaskManagerTray(
         trayThread.SetApartmentState(ApartmentState.STA);
         reviews.ReviewAvailable += RequestCodexReview;
         voiceInput.StatusChanged += RequestVoiceInputStatus;
+        voiceInput.RecognitionStarted += PrepareCodexProcess;
         trayThread.Start();
         trayReady.Wait(TimeSpan.FromSeconds(3));
     }
@@ -112,6 +113,7 @@ public sealed class TaskManagerTray(
             trayReady.Set();
             reviews.ReviewAvailable -= RequestCodexReview;
             voiceInput.StatusChanged -= RequestVoiceInputStatus;
+            voiceInput.RecognitionStarted -= PrepareCodexProcess;
         }
     }
 
@@ -125,6 +127,41 @@ public sealed class TaskManagerTray(
             "音声入力を準備しています…",
             VoiceInputStatusKind.Progress));
         _ = Task.Run(() => voiceInput.StartAsync(lifetime.ApplicationStopping));
+    }
+
+    /// <summary>録音開始後にCLI事前起動を非同期で要求する。</summary>
+    private void PrepareCodexProcess()
+    {
+        // 録音操作とUIスレッドを待たせず、起動負荷を分散する。
+        _ = PrepareCodexProcessAsync();
+    }
+
+    /// <summary>録音開始から2秒ずらして本文待機CLIを準備する。</summary>
+    private async Task PrepareCodexProcessAsync()
+    {
+        // アプリ終了時は遅延も取り消し、未設定や準備失敗は録音に影響させない。
+        try
+        {
+            await Task.Delay(TimeSpan.FromSeconds(2), lifetime.ApplicationStopping).ConfigureAwait(false);
+            TaskManagerSettings settings = await services.GetRequiredService<TaskRepository>()
+                .GetSettingsAsync().ConfigureAwait(false);
+            lifetime.ApplicationStopping.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(settings.CodexThreadIdentifier))
+            {
+                return;
+            }
+            services.GetRequiredService<ICodexCommandRunner>().Prepare(settings.CodexThreadIdentifier);
+            WriteVoiceReviewLog("Codex CLIを本文待機で事前起動しました。");
+        }
+        catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested)
+        {
+            // 終了時の取消しは障害として通知しない。
+        }
+        catch (Exception)
+        {
+            // 送信時に通常起動へ戻すため、本文や送信先を含む例外はログへ残さない。
+            WriteVoiceReviewLog("Codex CLIの事前起動を見送りました。送信時に通常起動します。");
+        }
     }
 
     /// <summary>音声入力の準備状況をトレイUIスレッドへ渡す。</summary>

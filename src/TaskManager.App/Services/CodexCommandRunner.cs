@@ -7,6 +7,9 @@ namespace TaskManager.Services;
 /// <summary>Codex CLIへの送信処理を抽象化する。</summary>
 public interface ICodexCommandRunner
 {
+    /// <summary>本文を送信せずCLIを標準入力待ちで準備する。</summary>
+    void Prepare(string threadIdentifier);
+
     /// <summary>指定タスクへ編集済み本文を送信する。</summary>
     Task<CodexCommandResult> SendAsync(CodexSubmission submission, CancellationToken cancellationToken);
 }
@@ -14,6 +17,9 @@ public interface ICodexCommandRunner
 /// <summary>外部プロセスの標準入出力実行を抽象化する。</summary>
 public interface ICodexProcessExecutor
 {
+    /// <summary>後続の送信で再利用するプロセスを入力待ちで起動する。</summary>
+    void Prepare(ProcessStartInfo startInformation);
+
     /// <summary>指定プロセスへ標準入力を渡して終了結果を返す。</summary>
     Task<CodexCommandResult> ExecuteAsync(
         ProcessStartInfo startInformation,
@@ -76,6 +82,22 @@ public sealed class CodexCommandRunner(ICodexProcessExecutor processExecutor) : 
         CodexSubmission submission,
         CancellationToken cancellationToken)
     {
+        // 事前起動時と同一の引数で、確認済み本文だけを送信する。
+        return executor.ExecuteAsync(CreateStartInformation(submission.ThreadIdentifier), submission.Text, cancellationToken);
+    }
+
+    /// <summary>送信先を検証して本文なしのCLI事前起動を要求する。</summary>
+    public void Prepare(string threadIdentifier)
+    {
+        // 空または不正な送信先ではプロセスを作成しない。
+        executor.Prepare(CreateStartInformation(threadIdentifier));
+    }
+
+    /// <summary>事前起動と通常送信で共通のCLI起動設定を構築する。</summary>
+    private static ProcessStartInfo CreateStartInformation(string threadIdentifier)
+    {
+        // プロセス作成前に送信先を正規化する。
+        string normalizedIdentifier = CodexThreadIdentifier.Normalize(threadIdentifier);
         // 本文を引数へ含めず、ハイフン指定した標準入力だけへ渡す。
         ProcessStartInfo startInformation = new()
         {
@@ -107,9 +129,9 @@ public sealed class CodexCommandRunner(ICodexProcessExecutor processExecutor) : 
         startInformation.ArgumentList.Add("--add-dir");
         startInformation.ArgumentList.Add(GetTaskManagerDirectory());
         startInformation.ArgumentList.Add("resume");
-        startInformation.ArgumentList.Add(CodexThreadIdentifier.Normalize(submission.ThreadIdentifier));
+        startInformation.ArgumentList.Add(normalizedIdentifier);
         startInformation.ArgumentList.Add("-");
-        return executor.ExecuteAsync(startInformation, submission.Text, cancellationToken);
+        return startInformation;
     }
 
     /// <summary>Codexからtaskctlを実行できるようTask Managerの配置先を返す。</summary>
@@ -122,8 +144,25 @@ public sealed class CodexCommandRunner(ICodexProcessExecutor processExecutor) : 
 }
 
 /// <summary>Windows上でCodex CLIプロセスを起動して標準入出力を処理する。</summary>
-public sealed class CodexProcessExecutor : ICodexProcessExecutor
+public sealed class CodexProcessExecutor : ICodexProcessExecutor, IDisposable
 {
+    // 未送信プロセスを最大1個だけ保持する事前起動プールを保持する。
+    private readonly CodexProcessPreparation preparation = new();
+
+    /// <summary>本文を渡さずにCLIを起動する。</summary>
+    public void Prepare(ProcessStartInfo startInformation)
+    {
+        // 既存の待機プロセスが一致する場合は重複起動しない。
+        preparation.Prepare(startInformation);
+    }
+
+    /// <summary>アプリ終了時に未送信の待機プロセスを終了する。</summary>
+    public void Dispose()
+    {
+        // 本文未送信のプロセスだけを回収する。
+        preparation.Dispose();
+    }
+
     /// <summary>プロセスへ本文を渡し、終了コードと短いエラーを返す。</summary>
     public async Task<CodexCommandResult> ExecuteAsync(
         ProcessStartInfo startInformation,
@@ -131,13 +170,11 @@ public sealed class CodexProcessExecutor : ICodexProcessExecutor
         CancellationToken cancellationToken)
     {
         // シェルを介さずにCLIを起動し、出力をファイルへ残さず一時表示用に読み取る。
-        using Process process = new() { StartInfo = startInformation };
+        cancellationToken.ThrowIfCancellationRequested();
+        CodexPreparedProcess preparedProcess;
         try
         {
-            if (!process.Start())
-            {
-                return new CodexCommandResult { IsSuccess = false, ExitCode = -1, ErrorMessage = "Codex CLIを起動できませんでした。" };
-            }
+            preparedProcess = preparation.TakeOrStart(startInformation);
         }
         catch (Exception startError) when (startError is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
@@ -150,8 +187,12 @@ public sealed class CodexProcessExecutor : ICodexProcessExecutor
             };
         }
 
-        Task<string> outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        Task<string> errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+        using CodexPreparedProcess ownedProcess = preparedProcess;
+        Process process = ownedProcess.Process;
+        // アプリ終了時は送信中の子プロセスも終了させ、孤立させない。
+        using CancellationTokenRegistration cancellationRegistration = cancellationToken.Register(ownedProcess.Stop);
+        Task<string> outputTask = ownedProcess.Output;
+        Task<string> errorTask = ownedProcess.Error;
         string inputError = string.Empty;
         try
         {
