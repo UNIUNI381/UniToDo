@@ -47,9 +47,11 @@ dotnet --list-sdks
 
 自己完結型`win-x64`配布物を作り、ユーザー領域へインストールします。利用PCに.NETランタイムは不要です。
 
+発行とインストールにはPowerShell 7を使用します。Windows PowerShell 5.1の`powershell`ではなく、次のように`pwsh`を明示して実行してください。
+
 ```powershell
-.\scripts\publish.ps1
-.\scripts\install.ps1
+pwsh -NoProfile -File .\scripts\publish.ps1
+pwsh -NoProfile -File .\scripts\install.ps1
 ```
 
 インストール先は`%LOCALAPPDATA%\Programs\TaskManager`、データ保存先は`%LOCALAPPDATA%\TaskManager`です。デスクトップには`UniToDo`ショートカット、ログオン時の自動起動にはWindowsタスク`UniToDo Watchdog`が設定され、`http://127.0.0.1:48120`だけで待ち受けます。

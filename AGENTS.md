@@ -28,6 +28,7 @@
 - 変数名は意味の分かる単語を使い、一文字名、不要な省略、頭字語だけの名前を避ける。
 - メンバー変数には保持内容を示す短いコメントを付ける。
 - 変更後は `scripts/test.ps1` を実行し、必要な発行・インストールで現環境へ反映する。第三者配布用ZIPは、ユーザーが頒布版の生成を明示した場合だけ生成する。
+- 発行・インストールはPowerShell 7で実行する。`pwsh -NoProfile -File ./scripts/publish.ps1`、`pwsh -NoProfile -File ./scripts/install.ps1`を使用し、Windows PowerShell 5.1の`powershell`では実行しない。
 - OpenAI API、Apps Script、Google Sheets同期、外部公開用サーバーを追加しない。
 - Webサーバーの待受先を `127.0.0.1:48120` 以外へ広げない。
 - ローカルUniToDo本体（開発名`TaskManager`）のGoogle Calendar API連携は `calendar.readonly` 以外の権限を要求しない。この制約はローカルアプリの同期機能だけに適用する。
