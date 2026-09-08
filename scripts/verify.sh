@@ -161,7 +161,11 @@ echo -e "\n${BOLD}${BLUE}[Stage 3/5] ビルド検査 (dotnet build --warnaserror
 
 if command -v dotnet >/dev/null 2>&1; then
     echo "  .NET SDK 検出: $(dotnet --version)"
-    if dotnet build "${PROJECT_ROOT}/TaskManager.slnx" -c Release --warnaserror; then
+    BUILD_ARGS=("-c" "Release" "--warnaserror")
+    if [[ "$(uname)" != "MINGW"* && "$(uname)" != "CYGWIN"* && "$(uname)" != "MSYS"* ]]; then
+        BUILD_ARGS+=("-p:EnableWindowsTargeting=true")
+    fi
+    if dotnet build "${PROJECT_ROOT}/TaskManager.slnx" "${BUILD_ARGS[@]}"; then
         echo -e "${GREEN}  ✓ ソリューションビルド (警告ゼロ): パス${NC}"
     else
         echo -e "${RED}[ERROR] ビルドに失敗しました。警告またはエラーを解消してください。${NC}"

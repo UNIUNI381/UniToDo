@@ -37,7 +37,8 @@ Vaultでは`.obsidian/app.json`と`.obsidian/.gitignore`を追跡します。リ
 2. 初回登録では管理対象のルートとファイルを明示して`git add`する。ワークスペース全体を無検査で登録しない。
 3. `git diff --cached --name-status`と`git diff --cached --stat`でステージ済み一覧を確認する。
 4. DB、バックアップ、資格情報、トークン、個人設定、生成物、大容量バイナリがないことをファイル名と内容の両面で検査する。
-5. `scripts/test.ps1`を実行し、実装とVaultが一致した状態で変更単位ごとにコミットする。
+5. コミット時に `.githooks/pre-commit` および `scripts/verify.sh` により、ステージングファイル検査に加え、Git の `user.name` / `user.email` が未設定またはローカルホスト名・個人名を含まないかが自動検証される。
+6. `scripts/test.ps1`（またはMac/Linux環境では `scripts/verify.sh`）を実行し、実装とVaultが一致した状態で変更単位ごとにコミットする。
 
 ## GitHubへの公開
 
