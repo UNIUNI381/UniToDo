@@ -79,6 +79,33 @@ if [[ "${FOUND_FORBIDDEN}" == "true" ]]; then
 fi
 echo -e "${GREEN}  ✓ 禁止インテグレーション検査: パス (OpenAI/AppsScript混入なし)${NC}"
 
+# 1-3: Gitコミット作成者（Author/Email）のプライバシー・漏洩検査
+if git -C "${PROJECT_ROOT}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    AUTHOR_NAME=$(git -C "${PROJECT_ROOT}" config user.name || true)
+    AUTHOR_EMAIL=$(git -C "${PROJECT_ROOT}" config user.email || true)
+    
+    if [[ -z "${AUTHOR_NAME}" || -z "${AUTHOR_EMAIL}" ]]; then
+        echo -e "${RED}[ERROR] git config の user.name または user.email が未設定です。${NC}"
+        echo -e "${YELLOW}macOS/OSのシステムアカウント名がコミットに自動露出するのを防ぐため、明示的な設定が必要です。${NC}"
+        echo -e "${CYAN}設定例: git config user.name \"sorami-wanwan\" && git config user.email \"56887905+sorami-wanwan@users.noreply.github.com\"${NC}"
+        exit 1
+    fi
+    
+    # ローカルホスト名や本名リークの検出
+    if [[ "${AUTHOR_EMAIL}" =~ \.local$ || "${AUTHOR_EMAIL}" =~ localhost || "${AUTHOR_EMAIL}" =~ @.*MacBook.* ]]; then
+        echo -e "${RED}[ERROR] git config の user.email にローカルホスト名（${AUTHOR_EMAIL}）が含まれています。${NC}"
+        echo -e "${YELLOW}GitHub noreply メール等（例: ...@users.noreply.github.com）を設定してください。${NC}"
+        exit 1
+    fi
+    
+    if echo "${AUTHOR_NAME} ${AUTHOR_EMAIL}" | grep -iE "kikusawa" >/dev/null 2>&1; then
+        echo -e "${RED}[ERROR] git config にプライバシー情報（kikusawa）が含まれています。${NC}"
+        echo -e "${YELLOW}パブリック公開リポジトリのため、意図しない本名露出を遮断しました。${NC}"
+        exit 1
+    fi
+fi
+echo -e "${GREEN}  ✓ コミット作成者プライバシー検査: パス (${AUTHOR_NAME} <${AUTHOR_EMAIL}>)${NC}"
+
 # pre-commit モードなら Stage 1 で超高速終了（コミットを即座に許可）
 if [[ "${PRE_COMMIT_MODE}" == "true" ]]; then
     echo -e "\n${BOLD}${GREEN}✔ Pre-commit セキュリティ検査に合格しました。コミットを継続します。${NC}\n"
