@@ -17,17 +17,18 @@
 
 ## タスク操作依頼
 
-- Codexからの日常操作では、リポジトリ内の `.agents/skills/manage-local-tasks/SKILL.md` を使用し、操作規則は同Skillを正本とする。
+- AntigravityやCodexからの日常操作では、リポジトリ内の `.agents/skills/manage-local-tasks/SKILL.md` を使用し、操作規則は同Skillを正本とする。
 
 ## 開発依頼
 
 - 開発変更を行うときは、リポジトリ内の `.agents/skills/update-task-manager-system/SKILL.md` を使用する。
-- 対象フレームワークは `net10.0-windows` のみとし、.NET 8以前へ下げない。
+- アーキテクチャはバックグラウンドで稼働する Headless Core API（Web SPA + REST API）と、各OSの Thin Client（CLI, MCP, トレイ等）に分離し、DBアクセスは Core API が一元管理・排他制御する。
+- 対象フレームワークは `net10.0`（クロスプラットフォーム）を基本とし、Windows専用UI/トレイ連携のみ `net10.0-windows` を許容する。.NET 8以前へ下げない。
 - すべての関数の先頭に機能を表す日本語コメントを1行入れる。
 - 機能ブロックと数値計算へ日本語コメントを入れる。
 - 変数名は意味の分かる単語を使い、一文字名、不要な省略、頭字語だけの名前を避ける。
 - メンバー変数には保持内容を示す短いコメントを付ける。
-- 変更後は `scripts/test.ps1` を実行し、必要な発行・インストールで現環境へ反映する。第三者配布用ZIPは、ユーザーが頒布版の生成を明示した場合だけ生成する。
+- 変更後は環境に応じて `scripts/verify.sh`（Mac/Linux）または `scripts/test.ps1`（Windows）、あるいは `dotnet test` を実行し、ローカル検証ハーネスをすべて通過させる。第三者配布用ZIPは、ユーザーが頒布版の生成を明示した場合だけ生成する。
 - OpenAI API、Apps Script、Google Sheets同期、外部公開用サーバーを追加しない。
 - Webサーバーの待受先を `127.0.0.1:48120` 以外へ広げない。
 - ローカルUniToDo本体（開発名`TaskManager`）のGoogle Calendar API連携は `calendar.readonly` 以外の権限を要求しない。この制約はローカルアプリの同期機能だけに適用する。
@@ -35,7 +36,7 @@
 
 ## データ保護
 
-- 正本は `%LOCALAPPDATA%\TaskManager\task-manager.db` とする。
+- データ保存先は、エンドユーザー環境（`.git` なし）ではアプリ直下の `data/`（完全ポータブルモード）、Gitリポジトリ環境（`.git` あり）では `git clean -fdx` 事故を防ぐため各OS標準ローカルデータ領域（Windows: `%LOCALAPPDATA%\TaskManager`, macOS/Linux: `~/.unitodo/` または `~/.local/share/TaskManager`）とし、環境変数 `TASKMANAGER_DATA_DIR` でオーバーライド可能とする。
 - `credentials.json`、OAuthトークン、SQLite本体、バックアップをGitへ追加しない。
 - 移行元XLSXやGoogleスプレッドシートへ書き戻さない。
 - 破壊的な変更の前にはSQLiteバックアップを作成する。
