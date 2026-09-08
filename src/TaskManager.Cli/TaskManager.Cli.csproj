@@ -3,7 +3,6 @@
     <OutputType>Exe</OutputType>
     <AssemblyName>taskctl</AssemblyName>
     <RootNamespace>TaskManager.CliHost</RootNamespace>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\TaskManager.App\TaskManager.App.csproj" />

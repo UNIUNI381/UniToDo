@@ -1,3 +1,4 @@
+#if WINDOWS
 using System.Drawing;
 using TaskManager.Services;
 
@@ -280,3 +281,4 @@ public sealed class VoiceInputStatusForm : Form
         }
     }
 }
+#endif

@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Mvc;
 using TaskManager.Data;
 using TaskManager.Domain;
 using TaskManager.Services;
-using TaskManager.Windows;
 
 namespace TaskManager.Api;
 
@@ -179,11 +178,11 @@ public static class ApiEndpoints
     private static IResult CreateCodexReview(
         CodexReviewRequest reviewRequest,
         CodexReviewService reviewService,
-        TaskManagerTray taskManagerTray,
+        IUserNotificationService userNotificationService,
         VoiceInputCoordinator voiceInputCoordinator)
     {
         // ネイティブ確認画面を表示できない状態では本文を受け取らず送信元へ返す。
-        if (!taskManagerTray.CanShowCodexReview)
+        if (!userNotificationService.CanShowCodexReview)
         {
             return Results.Json(
                 new { error = $"{TaskConstants.ApplicationDisplayName}の確認画面を表示できません。" },

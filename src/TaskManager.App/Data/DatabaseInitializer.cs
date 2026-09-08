@@ -15,13 +15,13 @@ public sealed class DatabaseInitializer(TaskManagerPaths taskManagerPaths)
     /// <summary>SQLite接続を作成して共通設定を適用する。</summary>
     public SqliteConnection OpenConnection()
     {
-        // 同時操作に耐えられるよう共有キャッシュと待機時間を設定する。
+        // WALモードと整合するプライベートキャッシュとビジー待機時間を設定する。
         EnsureSqliteProvider();
         SqliteConnectionStringBuilder connectionBuilder = new()
         {
             DataSource = paths.DatabasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
-            Cache = SqliteCacheMode.Shared,
+            Cache = SqliteCacheMode.Default,
             Pooling = true
         };
         SqliteConnection connection = new(connectionBuilder.ToString());
@@ -32,17 +32,24 @@ public sealed class DatabaseInitializer(TaskManagerPaths taskManagerPaths)
         return connection;
     }
 
-    /// <summary>Windows内蔵SQLiteのプロバイダーを1回だけ初期化する。</summary>
+    /// <summary>クロスプラットフォームに対応したSQLiteプロバイダーを初期化する。</summary>
     private static void EnsureSqliteProvider()
     {
-        // 脆弱なネイティブSQLiteを同梱せずWindows 10/11のwinsqlite3を利用する。
+        // WindowsではOS内蔵winsqlite3を優先し、Mac/Linuxではbundle_e_sqlite3を利用する。
         lock (ProviderLock)
         {
             if (providerInitialized)
             {
                 return;
             }
-            SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_winsqlite3());
+            if (OperatingSystem.IsWindows())
+            {
+                SQLitePCL.raw.SetProvider(new SQLitePCL.SQLite3Provider_winsqlite3());
+            }
+            else
+            {
+                SQLitePCL.Batteries_V2.Init();
+            }
             providerInitialized = true;
         }
     }

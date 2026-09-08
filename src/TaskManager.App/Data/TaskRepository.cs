@@ -385,6 +385,20 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
         return Convert.ToInt32(changedRows, CultureInfo.InvariantCulture) > 0;
     }
 
+    /// <summary>指定された通知キーが既に記録されているかを判定する。</summary>
+    public async Task<bool> HasNotificationAsync(
+        string notificationKey,
+        CancellationToken cancellationToken = default)
+    {
+        // 存在判定で不要な行読込を避ける。
+        await using SqliteConnection connection = initializer.OpenConnection();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM notification_ledger WHERE notification_key = $notificationKey LIMIT 1;";
+        command.Parameters.AddWithValue("$notificationKey", notificationKey);
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is not null;
+    }
+
     /// <summary>保存済み下書きバッチを新しい順で取得する。</summary>
     public async Task<List<DraftBatchRecord>> GetDraftBatchesAsync(
         string? projectIdentifier = null,

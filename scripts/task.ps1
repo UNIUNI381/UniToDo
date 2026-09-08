@@ -17,9 +17,15 @@ if (Test-Path -LiteralPath $publishedExecutable) {
     & $publishedExecutable @TaskArguments
     exit $LASTEXITCODE
 }
-$developmentAssembly = Join-Path $ProjectRoot "src\TaskManager.Cli\bin\Debug\net10.0-windows\win-x64\taskctl.dll"
+$developmentAssembly = Join-Path $ProjectRoot "src\TaskManager.Cli\bin\Debug\net10.0\taskctl.dll"
+if (-not (Test-Path -LiteralPath $developmentAssembly)) {
+    $developmentAssembly = Join-Path $ProjectRoot "src\TaskManager.Cli\bin\Debug\net10.0-windows\win-x64\taskctl.dll"
+}
 if (-not (Test-Path -LiteralPath $developmentAssembly)) {
     & (Join-Path $PSScriptRoot "build.ps1")
+}
+if (-not (Test-Path -LiteralPath $developmentAssembly)) {
+    $developmentAssembly = Join-Path $ProjectRoot "src\TaskManager.Cli\bin\Debug\net10.0\taskctl.dll"
 }
 $dotNetExecutable = Get-DotNetExecutable
 & $dotNetExecutable exec $developmentAssembly @TaskArguments

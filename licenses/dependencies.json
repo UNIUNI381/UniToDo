@@ -50,6 +50,24 @@
       "scope": "runtime"
     },
     {
+      "name": "SQLitePCLRaw.bundle_e_sqlite3",
+      "version": "2.1.12",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
+      "name": "SQLitePCLRaw.provider.e_sqlite3",
+      "version": "2.1.12",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
+      "name": "SQLitePCLRaw.lib.e_sqlite3",
+      "version": "2.1.12",
+      "license": "Apache-2.0",
+      "scope": "runtime"
+    },
+    {
       "name": "System.Management",
       "version": "7.0.2",
       "license": "MIT",

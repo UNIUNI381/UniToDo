@@ -79,9 +79,15 @@ public sealed class CodexSubmissionWorker(
     }
 }
 
-/// <summary>利用者へWindows通知を表示する機能を表す。</summary>
+/// <summary>利用者へ通知や対話画面を表示する機能を表す。</summary>
 public interface IUserNotificationService
 {
+    /// <summary>音声確認画面を表示可能であるかを返す。</summary>
+    bool CanShowCodexReview { get; }
+
+    /// <summary>通知機能や常駐アイコンを開始する。</summary>
+    void Start();
+
     /// <summary>指定したタイトルと本文を通知する。</summary>
     void Notify(string title, string message);
 

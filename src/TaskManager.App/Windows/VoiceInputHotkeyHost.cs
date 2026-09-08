@@ -1,3 +1,4 @@
+#if WINDOWS
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
@@ -69,3 +70,4 @@ public sealed class VoiceInputHotkeyHost : NativeWindow, IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool UnregisterHotKey(IntPtr windowHandle, int identifier);
 }
+#endif

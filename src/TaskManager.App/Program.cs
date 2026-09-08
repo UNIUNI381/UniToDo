@@ -77,13 +77,15 @@ public static class Program
             eventArguments.SetObserved();
         };
 
+#if WINDOWS
         // WinFormsスレッドの例外を記録し、トレイ機能だけの障害で本体全体を終了させない。
-        Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-        Application.ThreadException += (_, eventArguments) =>
+        System.Windows.Forms.Application.SetUnhandledExceptionMode(System.Windows.Forms.UnhandledExceptionMode.CatchException);
+        System.Windows.Forms.Application.ThreadException += (_, eventArguments) =>
             WriteRuntimeLogSynchronously(
                 logCategory,
                 "Windows画面スレッドの例外を検出しました。",
                 eventArguments.Exception);
+#endif
     }
 
     /// <summary>終了処理中でも完了を待って障害ログを保存する。</summary>
@@ -107,8 +109,7 @@ public static class Program
     private static async Task<int> RunApplicationAsync(string[] arguments)
     {
         // 既に起動中なら必要に応じて既存画面だけを開く。
-        using Mutex singleInstanceMutex = new(true, SingleInstanceMutexName, out bool mutexCreated);
-        if (!mutexCreated)
+        if (!TryAcquireSingleInstanceMutex(SingleInstanceMutexName, out Mutex? singleInstanceMutex))
         {
             if (!arguments.Contains("--background", StringComparer.OrdinalIgnoreCase))
             {
@@ -117,120 +118,159 @@ public static class Program
             return 0;
         }
 
-        WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        using (singleInstanceMutex)
         {
-            Args = arguments,
-            ContentRootPath = AppContext.BaseDirectory
-        });
-        builder.WebHost.UseUrls(TaskManagerPaths.GetLocalAddress());
-        builder.Services.ConfigureHttpJsonOptions(options =>
-        {
-            // WebとCLIで同じcamelCase JSONを利用する。
-            options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
-            options.SerializerOptions.WriteIndented = false;
-        });
-        RegisterServices(builder.Services);
+            WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
+            {
+                Args = arguments,
+                ContentRootPath = AppContext.BaseDirectory
+            });
+            builder.WebHost.UseUrls(TaskManagerPaths.GetLocalAddress());
+            builder.Services.ConfigureHttpJsonOptions(options =>
+            {
+                // WebとCLIで同じcamelCase JSONを利用する。
+                options.SerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+                options.SerializerOptions.WriteIndented = false;
+            });
+            RegisterServices(builder.Services);
 
-        WebApplication application = builder.Build();
-        application.UseMiddleware<LocalRequestMiddleware>();
-        application.UseMiddleware<UiChangeNotificationMiddleware>();
-        application.UseDefaultFiles();
-        application.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = ConfigureStaticFileResponse });
-        application.MapTaskManagerApi();
-        application.MapFallbackToFile("index.html");
+            WebApplication application = builder.Build();
+            application.UseMiddleware<LocalRequestMiddleware>();
+            application.UseMiddleware<UiChangeNotificationMiddleware>();
+            application.UseDefaultFiles();
+            application.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = ConfigureStaticFileResponse });
+            application.MapTaskManagerApi();
+            application.MapFallbackToFile("index.html");
 
-        DatabaseInitializer databaseInitializer = application.Services.GetRequiredService<DatabaseInitializer>();
-        await databaseInitializer.InitializeAsync();
-        TaskService taskService = application.Services.GetRequiredService<TaskService>();
-        await taskService.ReconcileTimeTrackingAsync();
-        TaskManagerTray tray = application.Services.GetRequiredService<TaskManagerTray>();
-        tray.Start();
-        await application.StartAsync();
-        SystemIncidentService systemIncidentService = application.Services.GetRequiredService<SystemIncidentService>();
-        SystemIncidentRecord? recoveredIncident = await systemIncidentService.MarkRecoveredAsync();
-        if (recoveredIncident is not null)
-        {
-            // 重要通知設定にかかわらず、自動復旧をユーザーへ一度だけ知らせる。
-            tray.Notify(
-                $"{TaskConstants.ApplicationDisplayName}を自動復旧しました",
-                "異常終了を検出しました。ダッシュボードでエラー情報を確認し、必要に応じてCodexへ共有してください。");
+            // POSIX環境で監視親から起動された場合、親プロセスの孤児化を防止する。
+            if (!OperatingSystem.IsWindows() && TryGetParentPid(arguments, out int parentPid))
+            {
+                StartParentProcessWatcher(parentPid, application);
+            }
+
+            DatabaseInitializer databaseInitializer = application.Services.GetRequiredService<DatabaseInitializer>();
+            await databaseInitializer.InitializeAsync();
+            TaskService taskService = application.Services.GetRequiredService<TaskService>();
+            await taskService.ReconcileTimeTrackingAsync();
+            IUserNotificationService notifications = application.Services.GetRequiredService<IUserNotificationService>();
+            notifications.Start();
+            await application.StartAsync();
+            SystemIncidentService systemIncidentService = application.Services.GetRequiredService<SystemIncidentService>();
+            SystemIncidentRecord? recoveredIncident = await systemIncidentService.MarkRecoveredAsync();
+            if (recoveredIncident is not null)
+            {
+                // 重要通知設定にかかわらず、自動復旧をユーザーへ一度だけ知らせる。
+                notifications.Notify(
+                    $"{TaskConstants.ApplicationDisplayName}を自動復旧しました",
+                    "異常終了を検出しました。ダッシュボードでエラー情報を確認し、必要に応じてCodexへ共有してください。");
+            }
+            if (!arguments.Contains("--background", StringComparer.OrdinalIgnoreCase))
+            {
+                OpenDashboard();
+            }
+            await application.WaitForShutdownAsync();
+            return 0;
         }
-        if (!arguments.Contains("--background", StringComparer.OrdinalIgnoreCase))
-        {
-            OpenDashboard();
-        }
-        await application.WaitForShutdownAsync();
-        return 0;
     }
 
     /// <summary>アプリ本体の異常終了を検出し、制限回数内で自動再起動する。</summary>
     private static async Task<int> RunWatchdogAsync()
     {
         // タスクスケジューラと手動起動が重なっても監視親を一つだけ維持する。
-        using Mutex watchdogMutex = new(true, WatchdogMutexName, out bool mutexCreated);
-        if (!mutexCreated)
+        if (!TryAcquireSingleInstanceMutex(WatchdogMutexName, out Mutex? watchdogMutex))
         {
             await WriteRuntimeLogAsync("watchdog", "既存の監視プロセスを検出したため重複起動を終了します。");
             return 0;
         }
 
-        // 正常終了は利用者による終了として監視も終了し、異常終了だけを再起動する。
-        string executablePath = Environment.ProcessPath
-            ?? throw new InvalidOperationException("TaskManager実行ファイルの場所を取得できません。");
-        int consecutiveRestartCount = 0;
-        await WriteRuntimeLogAsync(
-            "watchdog",
-            $"監視プロセスを開始しました。監視PID={Environment.ProcessId}");
-        while (true)
+        using (watchdogMutex)
         {
-            DateTimeOffset processStartedAt = DateTimeOffset.Now;
-            using ChildProcessJob childProcessJob = new();
-            using Process applicationProcess = StartManagedApplication(executablePath);
-            childProcessJob.Assign(applicationProcess);
+            // 正常終了は利用者による終了として監視も終了し、異常終了だけを再起動する。
+            string executablePath = Environment.ProcessPath
+                ?? throw new InvalidOperationException("TaskManager実行ファイルの場所を取得できません。");
+            int consecutiveRestartCount = 0;
             await WriteRuntimeLogAsync(
                 "watchdog",
-                $"アプリ本体を開始しました。本体PID={applicationProcess.Id}");
-            await applicationProcess.WaitForExitAsync();
-            TimeSpan processRuntime = DateTimeOffset.Now - processStartedAt;
-            await WriteRuntimeLogAsync(
-                "watchdog",
-                $"アプリ本体が終了しました。終了コード={applicationProcess.ExitCode} 稼働秒数={processRuntime.TotalSeconds:F1}");
-            if (applicationProcess.ExitCode == 0)
+                $"監視プロセスを開始しました。監視PID={Environment.ProcessId}");
+            while (true)
             {
-                await WriteRuntimeLogAsync("watchdog", "正常終了を検出したため監視プロセスを終了します。");
-                return 0;
-            }
+                DateTimeOffset processStartedAt = DateTimeOffset.Now;
+#if WINDOWS
+                using ChildProcessJob childProcessJob = new();
+                using Process applicationProcess = StartManagedApplication(executablePath);
+                childProcessJob.Assign(applicationProcess);
+#else
+                using Process applicationProcess = StartManagedApplication(executablePath);
+                EventHandler exitHandler = (_, _) =>
+                {
+                    try
+                    {
+                        if (!applicationProcess.HasExited)
+                        {
+                            applicationProcess.Kill(entireProcessTree: true);
+                        }
+                    }
+                    catch
+                    {
+                        // 終了処理中の例外は無視する。
+                    }
+                };
+                AppDomain.CurrentDomain.ProcessExit += exitHandler;
+#endif
+                try
+                {
+                    await WriteRuntimeLogAsync(
+                        "watchdog",
+                        $"アプリ本体を開始しました。本体PID={applicationProcess.Id}");
+                    await applicationProcess.WaitForExitAsync();
+                    TimeSpan processRuntime = DateTimeOffset.Now - processStartedAt;
+                    await WriteRuntimeLogAsync(
+                        "watchdog",
+                        $"アプリ本体が終了しました。終了コード={applicationProcess.ExitCode} 稼働秒数={processRuntime.TotalSeconds:F1}");
+                    if (applicationProcess.ExitCode == 0)
+                    {
+                        await WriteRuntimeLogAsync("watchdog", "正常終了を検出したため監視プロセスを終了します。");
+                        return 0;
+                    }
 
-            // 5分以上動作した場合は過去の異常終了を連続回数へ含めない。
-            if (processRuntime >= StableRuntime)
-            {
-                consecutiveRestartCount = 0;
+                    // 5分以上動作した場合は過去の異常終了を連続回数へ含めない。
+                    if (processRuntime >= StableRuntime)
+                    {
+                        consecutiveRestartCount = 0;
+                    }
+                    consecutiveRestartCount++;
+                    await WriteRuntimeLogAsync(
+                        "recovery",
+                        $"アプリ本体が終了コード{applicationProcess.ExitCode}で停止しました。再起動回数={consecutiveRestartCount}");
+                    try
+                    {
+                        SystemIncidentService systemIncidentService = new(new TaskManagerPaths(), TimeProvider.System);
+                        await systemIncidentService.RecordFailureAsync(applicationProcess.ExitCode, consecutiveRestartCount);
+                    }
+                    catch (Exception incidentError)
+                    {
+                        // 障害通知の保存失敗だけで監視と自動再起動を停止させない。
+                        await WriteRuntimeLogAsync(
+                            "watchdog-crash",
+                            "異常終了情報の保存に失敗しました。自動再起動は継続します。",
+                            incidentError);
+                    }
+                    if (consecutiveRestartCount >= MaximumConsecutiveRestartCount)
+                    {
+                        await WriteRuntimeLogAsync("recovery", "短時間の連続異常終了を検出したため自動再起動を停止しました。");
+                        ShowRestartFailureDialog();
+                        // 意図したサーキットブレーカー停止を成功終了として外側のタスクスケジューラへ伝える。
+                        return 0;
+                    }
+                    await Task.Delay(RestartDelay);
+                }
+                finally
+                {
+#if !WINDOWS
+                    AppDomain.CurrentDomain.ProcessExit -= exitHandler;
+#endif
+                }
             }
-            consecutiveRestartCount++;
-            await WriteRuntimeLogAsync(
-                "recovery",
-                $"アプリ本体が終了コード{applicationProcess.ExitCode}で停止しました。再起動回数={consecutiveRestartCount}");
-            try
-            {
-                SystemIncidentService systemIncidentService = new(new TaskManagerPaths(), TimeProvider.System);
-                await systemIncidentService.RecordFailureAsync(applicationProcess.ExitCode, consecutiveRestartCount);
-            }
-            catch (Exception incidentError)
-            {
-                // 障害通知の保存失敗だけで監視と自動再起動を停止させない。
-                await WriteRuntimeLogAsync(
-                    "watchdog-crash",
-                    "異常終了情報の保存に失敗しました。自動再起動は継続します。",
-                    incidentError);
-            }
-            if (consecutiveRestartCount >= MaximumConsecutiveRestartCount)
-            {
-                await WriteRuntimeLogAsync("recovery", "短時間の連続異常終了を検出したため自動再起動を停止しました。");
-                ShowRestartFailureDialog();
-                // 意図したサーキットブレーカー停止を成功終了として外側のタスクスケジューラへ伝える。
-                return 0;
-            }
-            await Task.Delay(RestartDelay);
         }
     }
 
@@ -246,6 +286,8 @@ public static class Program
         };
         processStartInfo.ArgumentList.Add("--background");
         processStartInfo.ArgumentList.Add("--watchdog-child");
+        processStartInfo.ArgumentList.Add("--parent-pid");
+        processStartInfo.ArgumentList.Add(Environment.ProcessId.ToString());
         return Process.Start(processStartInfo)
             ?? throw new InvalidOperationException("TaskManager本体を監視プロセスから起動できませんでした。");
     }
@@ -277,17 +319,108 @@ public static class Program
         }
     }
 
-    /// <summary>連続異常終了で自動復旧できないことをWindowsダイアログで通知する。</summary>
+    /// <summary>連続異常終了で自動復旧できないことを通知する。</summary>
     private static void ShowRestartFailureDialog()
     {
+#if WINDOWS
         // Webサーバーが起動できない状態でもユーザーが障害へ気づける表示手段を確保する。
         System.Windows.Forms.MessageBox.Show(
             $"{TaskConstants.ApplicationDisplayName}の起動に3回連続で失敗しました。\n"
             + "ログフォルダーを確認し、Codexへ修正を依頼してください。\n\n"
             + "%LOCALAPPDATA%\\TaskManager\\logs",
             $"{TaskConstants.ApplicationDisplayName}を起動できません",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Error);
+            System.Windows.Forms.MessageBoxButtons.OK,
+            System.Windows.Forms.MessageBoxIcon.Error);
+#else
+        // POSIX環境では標準エラー出力へ通知を書き出す。
+        Console.Error.WriteLine(
+            $"[ERROR] {TaskConstants.ApplicationDisplayName}の起動に3回連続で失敗しました。\n"
+            + "ログフォルダーを確認し、Codexへ修正を依頼してください。\n"
+            + new TaskManagerPaths().LogDirectory);
+#endif
+    }
+
+    /// <summary>多重起動防止用Mutexの取得を試行する。</summary>
+    private static bool TryAcquireSingleInstanceMutex(string mutexName, out Mutex? mutex)
+    {
+        // 名前付きMutexで排他制御を行い、直前プロセスの遺棄例外も適切に処理する。
+        try
+        {
+            mutex = new Mutex(false, mutexName);
+            bool hasHandle = false;
+            try
+            {
+                hasHandle = mutex.WaitOne(0, false);
+            }
+            catch (AbandonedMutexException)
+            {
+                // 直前プロセスが強制終了等で遺棄した場合も所有権を取得できたため起動を継続する。
+                hasHandle = true;
+            }
+
+            if (hasHandle)
+            {
+                return true;
+            }
+
+            mutex.Dispose();
+            mutex = null;
+            return false;
+        }
+        catch
+        {
+            mutex = null;
+            return false;
+        }
+    }
+
+    /// <summary>引数から親プロセスPIDを取得する。</summary>
+    private static bool TryGetParentPid(string[] arguments, out int parentPid)
+    {
+        // 監視親プロセスから渡されたPIDをコマンドライン引数から抽出する。
+        parentPid = 0;
+        for (int index = 0; index < arguments.Length - 1; index++)
+        {
+            if (string.Equals(arguments[index], "--parent-pid", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(arguments[index + 1], out parentPid))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>POSIX環境で監視親プロセスの終了を検知し、孤児化した本体を安全に終了する。</summary>
+    private static void StartParentProcessWatcher(int parentPid, WebApplication application)
+    {
+        // 親プロセスが消失した場合に自律終了するバックグラウンド監視タスクを開始する。
+        Task.Run(async () =>
+        {
+            try
+            {
+                using Process parentProcess = Process.GetProcessById(parentPid);
+                await parentProcess.WaitForExitAsync();
+            }
+            catch (ArgumentException)
+            {
+                // 親プロセスが既に存在しない場合は直ちに終了する。
+            }
+            catch
+            {
+                // プロセス監視中の予期せぬ例外時も安全側に倒して終了を試みる。
+            }
+
+            // 監視親が終了したためWebアプリケーションを停止する。
+            try
+            {
+                await application.StopAsync();
+            }
+            catch
+            {
+                // 停止処理失敗時はプロセスを直接終了する。
+                Environment.Exit(0);
+            }
+        });
     }
 
     /// <summary>アプリケーションサービスを依存性注入へ登録する。</summary>
@@ -331,8 +464,12 @@ public static class Program
             client.Timeout = TimeSpan.FromSeconds(45);
         });
         services.AddSingleton<VoiceInputCoordinator>();
+#if WINDOWS
         services.AddSingleton<TaskManagerTray>();
         services.AddSingleton<IUserNotificationService>(serviceProvider => serviceProvider.GetRequiredService<TaskManagerTray>());
+#else
+        services.AddSingleton<IUserNotificationService, HeadlessNotificationService>();
+#endif
         services.AddHostedService<AutomationWorker>();
         services.AddHostedService<CodexSubmissionWorker>();
     }

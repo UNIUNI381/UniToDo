@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <UseWindowsForms>true</UseWindowsForms>
+    <UseWindowsForms Condition="'$(TargetFramework)' == 'net10.0-windows'">true</UseWindowsForms>
     <AssemblyName>TaskManager.Tests</AssemblyName>
     <RootNamespace>TaskManager.Tests</RootNamespace>
   </PropertyGroup>

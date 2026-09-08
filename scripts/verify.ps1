@@ -1,4 +1,4 @@
-﻿$ProjectRoot = Split-Path -Parent $PSScriptRoot
+$ProjectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "common.ps1")
 
 function Assert-WindowsPowerShellCompatibility {
@@ -45,8 +45,8 @@ function Assert-FrameworkAndAddress {
     $buildProperties = Get-Content -LiteralPath (Join-Path $ProjectRoot "Directory.Build.props") -Raw -Encoding UTF8
     $globalSettings = Get-Content -LiteralPath (Join-Path $ProjectRoot "global.json") -Raw -Encoding UTF8 | ConvertFrom-Json
     $taskConstants = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\Domain\TaskConstants.cs") -Raw -Encoding UTF8
-    if ($buildProperties -notmatch '<TargetFramework>net10\.0-windows</TargetFramework>') {
-        throw "The target framework must be net10.0-windows."
+    if ($buildProperties -notmatch '<TargetFramework(?:s)?>.*net10\.0.*</TargetFramework(?:s)?>') {
+        throw "The target framework must be net10.0 or net10.0-windows."
     }
     if ([version]$globalSettings.sdk.version -lt [version]"10.0.303") {
         throw "The selected .NET SDK baseline must include the 10.0.11 security-servicing runtime."

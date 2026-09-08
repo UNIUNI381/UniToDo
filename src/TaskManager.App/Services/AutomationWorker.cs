@@ -1,19 +1,18 @@
 using TaskManager.Data;
 using TaskManager.Domain;
-using TaskManager.Windows;
 
 namespace TaskManager.Services;
 
 /// <summary>カレンダー同期、バックアップ、朝通知、完了確認を定期実行する。</summary>
 public sealed class AutomationWorker(
     IServiceProvider serviceProvider,
-    TaskManagerTray taskManagerTray,
+    IUserNotificationService userNotificationService,
     UiChangeNotifier uiChangeNotifier,
     ILogger<AutomationWorker> logger) : BackgroundService
 {
     // スコープ生成元、通知先、画面変更通知、ログを保持する。
     private readonly IServiceProvider services = serviceProvider;
-    private readonly TaskManagerTray tray = taskManagerTray;
+    private readonly IUserNotificationService notifications = userNotificationService;
     private readonly UiChangeNotifier changeNotifier = uiChangeNotifier;
     private readonly ILogger<AutomationWorker> applicationLogger = logger;
     private DateTimeOffset lastCalendarAttempt = DateTimeOffset.MinValue;
@@ -98,13 +97,13 @@ public sealed class AutomationWorker(
         }
         foreach (TimeEntryRecord warnedEntry in automationResult.WarnedEntries)
         {
-            tray.Notify(
+            notifications.Notify(
                 "作業タイマーが長時間継続しています",
                 $"{warnedEntry.Title}：続けるか停止してください。");
         }
         foreach (TimeEntryRecord stoppedEntry in automationResult.AutoStoppedEntries)
         {
-            tray.Notify(
+            notifications.Notify(
                 "作業タイマーを自動停止しました",
                 $"{stoppedEntry.Title}：記録内容を確認してください。");
         }
@@ -130,7 +129,7 @@ public sealed class AutomationWorker(
             recommendation.Recommendation.Task.Identifier,
             cancellationToken))
         {
-            tray.Notify(
+            notifications.Notify(
                 "今日の最優先タスク",
                 $"{recommendation.Recommendation.Task.Title}（{recommendation.Recommendation.SuggestedMinutes}分）");
         }
@@ -162,7 +161,7 @@ public sealed class AutomationWorker(
                 task.UpdatedAt = currentTime;
                 await repository.SaveTaskAsync(task, "完了確認通知", TaskConstants.SystemSource, cancellationToken);
                 taskChanged = true;
-                tray.Notify("完了しましたか？", task.Title);
+                notifications.Notify("完了しましたか？", task.Title);
             }
         }
         return taskChanged;
@@ -175,11 +174,12 @@ public sealed class AutomationWorker(
         DateTimeOffset currentTime,
         CancellationToken cancellationToken)
     {
-        // 通知台帳を汎用の日次重複防止として利用する。
+        // 通知台帳を確認し、当日未作成ならバックアップ成功後に台帳へ記録する。
         string backupKey = $"backup:{currentTime:yyyy-MM-dd}";
-        if (await repository.TryRecordNotificationAsync(backupKey, "日次バックアップ", string.Empty, cancellationToken))
+        if (!await repository.HasNotificationAsync(backupKey, cancellationToken))
         {
             await databaseInitializer.CreateBackupAsync("daily", cancellationToken);
+            await repository.TryRecordNotificationAsync(backupKey, "日次バックアップ", string.Empty, cancellationToken);
         }
     }
 }

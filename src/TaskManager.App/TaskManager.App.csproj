@@ -1,19 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <UseWindowsForms>true</UseWindowsForms>
+    <TargetFrameworks>net10.0;net10.0-windows</TargetFrameworks>
+    <OutputType Condition="'$(TargetFramework)' == 'net10.0-windows'">WinExe</OutputType>
+    <OutputType Condition="'$(TargetFramework)' != 'net10.0-windows'">Exe</OutputType>
+    <UseWindowsForms Condition="'$(TargetFramework)' == 'net10.0-windows'">true</UseWindowsForms>
     <AssemblyName>TaskManager</AssemblyName>
     <RootNamespace>TaskManager</RootNamespace>
     <AssemblyTitle>UniToDo</AssemblyTitle>
     <Product>UniToDo</Product>
     <Description>UniToDo Windowsローカルタスク管理アプリ</Description>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <ApplicationIcon>Assets\TaskManager.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Google.Apis.Calendar.v3" Version="1.*" />
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.*" />
     <PackageReference Include="SQLitePCLRaw.provider.winsqlite3" Version="2.*" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="2.1.12" />
   </ItemGroup>
   <ItemGroup>
     <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />

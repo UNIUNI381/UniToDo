@@ -16,6 +16,9 @@ UniToDoの独自部分は、ルートの`LICENSE`に記載したMIT Licenseで�
 | Newtonsoft.Json | 13.0.4 | 実行時 | MIT / Copyright (c) 2007 James Newton-King | [NuGet](https://www.nuget.org/packages/Newtonsoft.Json/13.0.4) |
 | SQLitePCLRaw.core | 2.1.12 | 実行時 | Apache-2.0 / Copyright 2014-2024 SourceGear, LLC | [NuGet](https://www.nuget.org/packages/SQLitePCLRaw.core/2.1.12) |
 | SQLitePCLRaw.provider.winsqlite3 | 2.1.11 | 実行時 | Apache-2.0 / Copyright 2014-2024 SourceGear, LLC | [NuGet](https://www.nuget.org/packages/SQLitePCLRaw.provider.winsqlite3/2.1.11) |
+| SQLitePCLRaw.bundle_e_sqlite3 | 2.1.12 | 実行時 | Apache-2.0 / Copyright 2014-2024 SourceGear, LLC | [NuGet](https://www.nuget.org/packages/SQLitePCLRaw.bundle_e_sqlite3/2.1.12) |
+| SQLitePCLRaw.provider.e_sqlite3 | 2.1.12 | 実行時 | Apache-2.0 / Copyright 2014-2024 SourceGear, LLC | [NuGet](https://www.nuget.org/packages/SQLitePCLRaw.provider.e_sqlite3/2.1.12) |
+| SQLitePCLRaw.lib.e_sqlite3 | 2.1.12 | 実行時 | Apache-2.0 / Copyright 2014-2024 SourceGear, LLC | [NuGet](https://www.nuget.org/packages/SQLitePCLRaw.lib.e_sqlite3/2.1.12) |
 | System.Management | 7.0.2 | 実行時 | MIT / Microsoft Corporation、.NET Foundation and Contributors | [NuGet](https://www.nuget.org/packages/System.Management/7.0.2) |
 | System.CodeDom | 7.0.0 | ソースのビルド・テスト | MIT / Microsoft Corporation、.NET Foundation and Contributors | [NuGet](https://www.nuget.org/packages/System.CodeDom/7.0.0) |
 | Microsoft.NETCore.App.Runtime.win-x64 | 10.0.11 | 自己完結ランタイム | Microsoft .NET Library Licenseと付属ThirdPartyNotices | [.NETライセンス情報](https://github.com/dotnet/core/blob/main/license-information.md) |

@@ -1,10 +1,14 @@
 using System.Diagnostics;
+#if WINDOWS
 using System.Drawing;
+#endif
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+#if WINDOWS
 using System.Windows.Forms;
+#endif
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using TaskManager.Api;
@@ -53,12 +57,15 @@ public static class Program
         await RunTestAsync("今日から7日分のウィジェット予定を抽出する", TestCalendarWidgetProjectionAsync);
         await RunTestAsync("Google Calendar埋め込みURLを安全に保存する", TestCalendarEmbedUrlAsync);
         await RunTestAsync("同期エラー時もカレンダーキャッシュを表示する", TestCalendarCacheOnErrorAsync);
+        await RunTestAsync("OAuthトークンストアが暗号化保存と復号を行える", TestOAuthDataStoreAsync);
         await RunTestAsync("CodexタスクIDとディープリンクを正規化する", TestCodexThreadIdentifierAsync);
         await RunTestAsync("CodexタスクをURLプロトコルだけで開く", TestCodexDeepLinkLaunchAsync);
         await RunTestAsync("Codex送信先設定をSQLiteで保持する", TestCodexSettingsRoundTripAsync);
         await RunTestAsync("音声確認待ちをFIFOで処理する", TestCodexReviewQueueAsync);
+#if WINDOWS
         await RunTestAsync("音声確認画面を指定ディスプレイ内へ配置する", TestCodexReviewWindowPlacementAsync);
         await RunTestAsync("音声状態表示を長文に合わせて拡張し上方へ配置する", TestVoiceInputStatusLayoutAsync);
+#endif
         await RunTestAsync("Codex送信先未設定時にCLI起動を拒否する", TestCodexUnconfiguredDispatchAsync);
         await RunTestAsync("Codex CLIへ本文を標準入力で渡す", TestCodexCommandDispatchAsync);
         await RunTestAsync("Codex CLI失敗時に本文を確認待ちへ戻す", TestCodexSubmissionFailureAsync);
@@ -910,6 +917,55 @@ public static class Program
             "同期エラー後にカレンダーキャッシュがウィジェットから失われました。");
     }
 
+    /// <summary>OAuthデータストアの暗号化保存、復号、権限、削除を検証する。</summary>
+    private static async Task TestOAuthDataStoreAsync()
+    {
+        // OS保護機能またはAES-GCMによる暗号化・復号・削除を確認する。
+        await using TestDatabase testDatabase = await TestDatabase.CreateAsync();
+        DpapiDataStore dataStore = new(testDatabase.Paths);
+
+        const string tokenKey = "google-user";
+        Dictionary<string, string> sampleToken = new()
+        {
+            ["access_token"] = "mock-access-token-12345",
+            ["refresh_token"] = "mock-refresh-token-67890"
+        };
+
+        await dataStore.StoreAsync(tokenKey, sampleToken);
+        Dictionary<string, string>? loadedToken = await dataStore.GetAsync<Dictionary<string, string>>(tokenKey);
+
+        Assert(loadedToken is not null, "保存したOAuthトークンを復号できませんでした。");
+        Assert(loadedToken?["access_token"] == "mock-access-token-12345", "復号したアクセストークンが一致しません。");
+        Assert(loadedToken?["refresh_token"] == "mock-refresh-token-67890", "復号したリフレッシュトークンが一致しません。");
+
+        string tokenFilePath = Path.Combine(testDatabase.Paths.TokenDirectory, $"{tokenKey}.bin");
+        Assert(File.Exists(tokenFilePath), "トークンファイルが生成されていません。");
+
+        // 暗号化されているため平文文字列が含まれないことを確認する。
+        string rawContent = await File.ReadAllTextAsync(tokenFilePath);
+        Assert(!rawContent.Contains("mock-access-token-12345"), "トークンファイルに平文が含まれています。");
+
+        if (!OperatingSystem.IsWindows())
+        {
+            // POSIX環境では0600パーミッション（UserRead | UserWrite）を確認する。
+            UnixFileMode tokenMode = File.GetUnixFileMode(tokenFilePath);
+            Assert(
+                tokenMode == (UnixFileMode.UserRead | UnixFileMode.UserWrite),
+                $"トークンファイルのUnixパーミッションが0600ではありません（{tokenMode}）。");
+
+            string masterKeyPath = Path.Combine(testDatabase.Paths.TokenDirectory, ".keys", "master.key");
+            Assert(File.Exists(masterKeyPath), "POSIXマスターキーファイルが生成されていません。");
+            UnixFileMode keyMode = File.GetUnixFileMode(masterKeyPath);
+            Assert(
+                keyMode == (UnixFileMode.UserRead | UnixFileMode.UserWrite),
+                $"マスターキーファイルのUnixパーミッションが0600ではありません（{keyMode}）。");
+        }
+
+        await dataStore.ClearAsync();
+        Dictionary<string, string>? clearedToken = await dataStore.GetAsync<Dictionary<string, string>>(tokenKey);
+        Assert(clearedToken is null, "クリア後のトークンが取得されました。");
+    }
+
     /// <summary>CodexタスクIDとディープリンクの正規化を検証する。</summary>
     private static Task TestCodexThreadIdentifierAsync()
     {
@@ -1005,6 +1061,7 @@ public static class Program
         return Task.CompletedTask;
     }
 
+#if WINDOWS
     /// <summary>音声確認画面が指定したディスプレイ作業領域内へ完全に収まることを検証する。</summary>
     private static Task TestCodexReviewWindowPlacementAsync()
     {
@@ -1051,6 +1108,7 @@ public static class Program
         Assert(workingArea.Bottom - statusForm.Bottom >= 84, "音声状態表示がTypeWhisper表示を避ける高さへ移動していません。");
         return Task.CompletedTask;
     }
+#endif
 
     /// <summary>Codex送信先が未設定の場合にCLIを起動せず設定方法を案内することを検証する。</summary>
     private static async Task TestCodexUnconfiguredDispatchAsync()
@@ -2987,6 +3045,14 @@ public static class Program
         {
             // 実画面を出さず応答本文とエラー区分だけを記録する。
             Details.Add((message, isError));
+        }
+
+        /// <summary>GUI確認画面を表示可能かを返す。</summary>
+        public bool CanShowCodexReview => false;
+
+        /// <summary>通知サービスの開始処理を行う。</summary>
+        public void Start()
+        {
         }
     }
 

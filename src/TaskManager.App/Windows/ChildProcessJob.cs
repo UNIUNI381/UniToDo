@@ -1,3 +1,4 @@
+#if WINDOWS
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
@@ -146,3 +147,4 @@ internal sealed class ChildProcessJob : IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool AssignProcessToJobObject(SafeFileHandle job, IntPtr process);
 }
+#endif

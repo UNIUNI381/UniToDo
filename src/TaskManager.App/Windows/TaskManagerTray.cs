@@ -1,3 +1,4 @@
+#if WINDOWS
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Drawing;
@@ -711,3 +712,4 @@ public sealed class TaskManagerTray(
         }
     }
 }
+#endif
