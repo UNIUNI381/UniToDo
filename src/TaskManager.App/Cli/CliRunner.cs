@@ -284,15 +284,14 @@ public sealed class CliRunner
     /// <summary>JSONファイルの内容で既存タスクを更新する。</summary>
     private async Task<object?> UpdateAsync(string[] arguments, CancellationToken cancellationToken)
     {
-        // IDとJSONファイルを必須として完全更新する。
+        // 省略項目を既定値で補わず、指定されたJSONだけを送る。
         if (arguments.Length < 2)
         {
             throw new InvalidOperationException("更新対象のタスクIDを指定してください。");
         }
         string identifier = arguments[1];
         string jsonPath = GetOption(arguments, "--file") ?? throw new InvalidOperationException("--fileを指定してください。");
-        ManagedTask task = JsonSerializer.Deserialize<ManagedTask>(await File.ReadAllTextAsync(jsonPath, cancellationToken), JsonOptions)
-            ?? throw new InvalidOperationException("タスクJSONを解析できません。");
+        JsonElement task = JsonSerializer.Deserialize<JsonElement>(await File.ReadAllTextAsync(jsonPath, cancellationToken), JsonOptions);
         return await PutAsync($"/api/v1/tasks/{Uri.EscapeDataString(identifier)}", task, cancellationToken);
     }
 
@@ -1083,6 +1082,7 @@ public sealed class CliRunner
             taskctl add --title 名称 [--project IDまたは表記] [--minutes 30] [--deadline 日時] [--importance 3]
             taskctl add --file task.json [--project IDまたは表記] [--no-deadline]
             taskctl update TASK-ID --file task.json
+              指定項目だけを更新。省略は維持、nullは解除。締切変更はdeadlineAtとdeadlineOrigin: explicitを指定。
             taskctl delete TASK-ID --confirm TASK-ID
             taskctl start|complete|continue|interrupt|postpone|cancel TASK-ID
             taskctl draft-create --file draft.json [--idempotency-key KEY] [--json]

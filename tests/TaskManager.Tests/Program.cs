@@ -79,6 +79,7 @@ public static class Program
         await RunTestAsync("校正本文はOllamaモデル準備後に送信する", TestOllamaScriptWaitsForModelAsync);
         await RunTestAsync("SQLiteへタスクと依存関係を保存する", TestRepositoryRoundTripAsync);
         await RunTestAsync("欠落依存と下書き操作を安全に拒否する", TestTaskServiceSafetyAsync);
+        await RunTestAsync("CLIの締切だけの更新で他の項目を保持し不正入力を拒否する", TestPartialTaskUpdateAsync);
         await RunTestAsync("空IDと仮参照キーで下書きを保存する", TestDraftReferenceMappingAsync);
         await RunTestAsync("不正な下書き参照をコミット前に拒否する", TestDraftPreCommitValidationAsync);
         await RunTestAsync("同じ冪等キーの下書きを重複作成しない", TestDraftIdempotencyAsync);
@@ -1735,6 +1736,85 @@ public static class Program
         Assert(wrongConfirmationRejected, "異なる確認IDで削除できてしまいました。");
         await taskService.DeleteTaskAsync(deletableTask.Identifier, deletableTask.Identifier, TaskConstants.SystemSource);
         Assert(await testDatabase.Repository.GetTaskAsync(deletableTask.Identifier) is null, "確認済みタスクを削除できませんでした。");
+    }
+
+    /// <summary>実際のCLI送信内容をサービスへ渡し、一時DBで部分更新を検証する。</summary>
+    private static async Task TestPartialTaskUpdateAsync()
+    {
+        // 完了済みタスクの名称、プロジェクト、依存、状態を期限更新から保護する。
+        await using TestDatabase testDatabase = await TestDatabase.CreateAsync();
+        TaskService taskService = CreateTaskServiceForTest(testDatabase, StandardTime());
+        ProjectRecord project = await CreateProjectService(testDatabase, StandardTime()).AddProjectAsync(
+            new ProjectRecord { Identifier = "PARTIAL-PROJECT", CanonicalName = "部分更新テスト" }, TaskConstants.SystemSource);
+        ManagedTask prerequisite = CreateTask("partial-prerequisite", "前提");
+        prerequisite.Status = TaskConstants.CompletedStatus;
+        await taskService.AddTaskAsync(prerequisite, TaskConstants.SystemSource);
+        ManagedTask original = CreateTask("partial-update", "保持する名称");
+        original.ProjectIdentifier = project.Identifier;
+        original.DependencyIdentifiers = [prerequisite.Identifier];
+        original.Status = TaskConstants.CompletedStatus;
+        original.Details = "保持する詳細";
+        original.CompletedAt = StandardTime();
+        original.DeadlineAt = StandardTime();
+        original.DeadlineType = TaskConstants.StrictDeadlineType;
+        await taskService.AddTaskAsync(original, TaskConstants.SystemSource);
+        string inputPath = Path.GetTempFileName();
+        try
+        {
+            await File.WriteAllTextAsync(inputPath, "{\"deadlineAt\":\"2026-09-10T18:00:00+09:00\"}");
+            using HttpClient client = new(new PartialUpdateMessageHandler(taskService)) { BaseAddress = new Uri("http://127.0.0.1:48120") };
+            CliRunner runner = new(client);
+            Assert(await runner.RunAsync(["update", original.Identifier, "--file", inputPath, "--json"]) == 0, "CLI更新が失敗しました。");
+            ManagedTask saved = (await testDatabase.Repository.GetTaskAsync(original.Identifier))!;
+            Assert(saved.DeadlineAt == DateTimeOffset.Parse("2026-09-10T18:00:00+09:00"), "指定期限が保存されませんでした。");
+            Assert(saved.Title == original.Title && saved.Details == original.Details && saved.Status == original.Status
+                && saved.ProjectIdentifier == original.ProjectIdentifier && saved.CompletedAt == original.CompletedAt
+                && saved.DeadlineType == original.DeadlineType
+                && saved.DependencyIdentifiers.SequenceEqual(original.DependencyIdentifiers), "省略項目が失われました。");
+
+            // 不正入力では一切保存せず、明示的なnullだけが期限を解除する。
+            foreach (string invalidJson in new[] { "{}", "[]", "null", "{\"deadineAt\":null}", "{\"title\":\" \"}", "{\"title\":null}", "{\"status\":null}", "{\"identifier\":\"other\"}", "{\"remainingMinutes\":\"bad\"}", "{\"title\":\"one\",\"Title\":\"two\"}" })
+            {
+                string before = JsonSerializer.Serialize(await testDatabase.Repository.GetTaskAsync(original.Identifier));
+                bool rejected = false;
+                try
+                {
+                    await taskService.UpdateTaskAsync(original.Identifier, JsonSerializer.Deserialize<JsonElement>(invalidJson), TaskConstants.SystemSource);
+                }
+                catch (InvalidOperationException)
+                {
+                    rejected = true;
+                }
+                Assert(rejected, $"不正入力が拒否されませんでした: {invalidJson}");
+                Assert(before == JsonSerializer.Serialize(await testDatabase.Repository.GetTaskAsync(original.Identifier)), "拒否した更新が保存されました。");
+            }
+            await taskService.UpdateTaskAsync(original.Identifier, JsonSerializer.Deserialize<JsonElement>("{\"deadlineAt\":null}"), TaskConstants.SystemSource);
+            Assert((await testDatabase.Repository.GetTaskAsync(original.Identifier))!.DeadlineAt is null, "明示的な期限解除が失敗しました。");
+        }
+        finally
+        {
+            File.Delete(inputPath);
+        }
+    }
+
+    /// <summary>CLIが省略値を追加しないことを確認して更新サービスへ接続する。</summary>
+    private sealed class PartialUpdateMessageHandler(TaskService taskService) : HttpMessageHandler
+    {
+        // 一時DBに対する更新サービスを保持する。
+        private readonly TaskService service = taskService;
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            // 締切以外が送信されていないことを検査して通常の更新経路を呼ぶ。
+            if (request.Method == HttpMethod.Get)
+            {
+                return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{}") };
+            }
+            JsonElement changes = JsonSerializer.Deserialize<JsonElement>(await request.Content!.ReadAsStringAsync(cancellationToken));
+            Assert(request.Method == HttpMethod.Put && changes.EnumerateObject().Count() == 1, "CLIが省略項目を補完しました。");
+            ManagedTask result = await service.UpdateTaskAsync("partial-update", changes, TaskConstants.SystemSource, cancellationToken);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(result)) };
+        }
     }
 
     /// <summary>空IDとaiReferenceKeyによる下書き依存関係の保存を検証する。</summary>

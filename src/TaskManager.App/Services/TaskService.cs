@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TaskManager.Data;
 using TaskManager.Domain;
 
@@ -58,7 +59,7 @@ public sealed class TaskService(
     /// <summary>既存タスクを更新する。</summary>
     public async Task<ManagedTask> UpdateTaskAsync(
         string taskIdentifier,
-        ManagedTask replacementTask,
+        JsonElement changes,
         string source,
         CancellationToken cancellationToken = default)
     {
@@ -70,6 +71,7 @@ public sealed class TaskService(
             Dictionary<string, ValidationSnapshot> validationSnapshots = CaptureValidationSnapshots(tasks);
             ManagedTask existingTask = tasks.FirstOrDefault(task => string.Equals(task.Identifier, taskIdentifier, StringComparison.OrdinalIgnoreCase))
                 ?? throw new KeyNotFoundException($"タスクが見つかりません: {taskIdentifier}");
+            ManagedTask replacementTask = TaskUpdate.Merge(existingTask, changes);
             if (!string.Equals(taskIdentifier, replacementTask.Identifier, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("更新時にタスクIDは変更できません。");

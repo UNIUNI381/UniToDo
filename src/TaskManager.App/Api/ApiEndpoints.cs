@@ -290,7 +290,7 @@ public static class ApiEndpoints
     /// <summary>指定IDのタスクを更新する。</summary>
     private static async Task<IResult> UpdateTaskAsync(
         string identifier,
-        ManagedTask task,
+        JsonElement task,
         HttpRequest request,
         TaskService taskService,
         CancellationToken cancellationToken)

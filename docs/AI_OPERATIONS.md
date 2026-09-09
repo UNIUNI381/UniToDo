@@ -13,7 +13,7 @@ taskctl now [--json]
 taskctl list [--status 状態] [--search 文字列] [--json]
 taskctl add --title 名称 [--project IDまたは表記] [--minutes 30] [--deadline 日時] [--importance 3]
 taskctl add --file task.json [--project IDまたは表記] [--no-deadline]
-taskctl update TASK-ID --file task.json
+taskctl update TASK-ID --file changes.json --json
 taskctl start|complete|continue|interrupt|postpone|cancel TASK-ID
 taskctl delete TASK-ID --confirm TASK-ID
 taskctl draft-create --file draft.json [--idempotency-key KEY] [--json]
@@ -149,6 +149,12 @@ taskctl project prepare "ユーザーが入力した表記" --json
 `aiReferenceKey`は全タスクで必須かつ一意です。`identifier`は空にでき、`dependencyIdentifiers`では同じバッチの`aiReferenceKey`を仮参照として使用できます。未解決参照や重複キーは保存前に拒否されます。
 
 子タスクの見積は15～120分にします。再送時は同じidempotency keyを使います。`saved: true`かつ`postProcessingSucceeded: false`の場合、下書きは保存済みであり、警告内容を確認して重複登録せず`draft get`で読み戻します。登録後は、ユーザーへローカル画面の「AI下書き」で検証結果を確認し、一括承認するよう案内します。
+
+## 既存タスクの部分更新
+
+`update`には変更する項目だけを渡します。例えば締切変更は`{"deadlineAt":"2026-09-10T18:00:00+09:00","deadlineOrigin":"explicit"}`です。省略項目は維持されます。`deadlineAt`だけでも由来は`explicit`へ補完されます。期限解除を指示された場合だけ`{"deadlineAt":null}`を使います。空白名称、不明・重複項目、不正な型、ID変更は保存前に拒否します。
+
+一括変更は各件保存です。事前に対象を絞り、各件の直前に状態と期限を確認し、更新後は`list --json`で名称・プロジェクトID・状態・変更項目を照合します。期限切れの未完了タスクが対象なら完了・中止を除外します。失敗または不一致なら停止し、成功済みIDと未処理件数を報告します。
 
 ## 安全規則
 
