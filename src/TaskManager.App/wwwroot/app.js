@@ -71,6 +71,7 @@ const horizontalScrollbarHideTimers = new WeakMap();
 async function initializeApplication() {
   // ナビゲーションと主要操作を接続して初期データを取得する。
   initializeNavigation();
+  initializeNavigationScrollbar();
   initializeTaskDialog();
   initializeCustomFilters();
   initializeProjectDialogs();
@@ -131,6 +132,13 @@ async function initializeApplication() {
   } catch (error) {
     showNotice(error.message, true);
   }
+}
+
+/** スマホ上部メニューの横スクロールバーを操作時だけ表示する。 */
+function initializeNavigationScrollbar() {
+  // 既存の横スクロール処理を再利用し、タブのタップ操作と指による横移動を両立させる。
+  const navigation = document.getElementById("navigation");
+  attachHorizontalDragScrolling(navigation);
 }
 
 /** 変更通知で画面自身を識別する一意な値を作成する。 */
