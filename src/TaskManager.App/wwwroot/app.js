@@ -71,6 +71,10 @@ const horizontalScrollbarHideTimers = new WeakMap();
 async function initializeApplication() {
   // ナビゲーションと主要操作を接続して初期データを取得する。
   initializeNavigation();
+  initializeMobileNavigation(() => applicationState.activeView, viewName => {
+    // スワイプとクリックで同じ画面切替・エラー表示を使用する。
+    switchView(viewName).catch(error => showNotice(error.message, true));
+  });
   initializeNavigationScrollbar();
   initializeTaskDialog();
   initializeCustomFilters();
@@ -260,7 +264,8 @@ function initializeNavigation() {
   for (const navigationButton of document.querySelectorAll(".nav-button")) {
     navigationButton.addEventListener("click", async function handleNavigationClick() {
       const viewName = navigationButton.dataset.view;
-      await switchView(viewName);
+      try { await switchView(viewName); }
+      catch (error) { showNotice(error.message, true); }
     });
   }
 }
@@ -348,6 +353,9 @@ async function switchView(viewName) {
   for (const navigationButton of document.querySelectorAll(".nav-button")) {
     navigationButton.classList.toggle("active", navigationButton.dataset.view === viewName);
   }
+  // 先に選択先の保持済みDOMを描画し、データ取得を待たず切替を見せる。
+  await new Promise(resolve => window.requestAnimationFrame(() => window.setTimeout(resolve, 0)));
+  if (applicationState.activeView !== viewName) return;
   if (viewName === "dashboard") await loadDashboard();
   if (viewName === "tasks" || viewName === "drafts") await loadTasks();
   if (viewName === "projects") await loadProjects();
@@ -2219,13 +2227,14 @@ function attachHorizontalDragScrolling(scrollContainer) {
     startingHorizontalPosition = event.clientX;
     startingScrollPosition = scrollContainer.scrollLeft;
     hasDragged = false;
-    scrollContainer.setPointerCapture(event.pointerId);
+    // 押しただけでは捕捉せず、子ボタンへ通常のクリックを届ける。
     showHorizontalScrollbarTemporarily(scrollContainer);
   });
   scrollContainer.addEventListener("pointermove", function moveHorizontalDrag(event) {
     if (activePointerIdentifier !== event.pointerId) return;
     const horizontalDistance = event.clientX - startingHorizontalPosition;
     if (!hasDragged && Math.abs(horizontalDistance) < 3) return;
+    if (!hasDragged) scrollContainer.setPointerCapture(event.pointerId);
     hasDragged = true;
     scrollContainer.classList.add("dragging");
     scrollContainer.scrollLeft = startingScrollPosition - horizontalDistance;
