@@ -357,13 +357,15 @@ dialog::backdrop { background: rgba(12,25,18,.52); backdrop-filter: blur(3px); }
 
 @media (max-width: 800px) {
   .notice { top: 14px; left: 50%; }
-  .app-shell { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; padding: 16px; }
+  /* メニューの内容幅で画面全体が広がらないよう、端末幅まで縮小を許可する。 */
+  .app-shell { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { position: static; height: auto; min-width: 0; padding: 16px; }
   .brand { margin-bottom: 14px; }
   nav { display: flex; overflow-x: auto; }
   .nav-button { white-space: nowrap; }
   .sidebar-footer { display: none; }
   .main-content { padding: 28px 18px 60px; }
+  .page-header { flex-wrap: wrap; gap: 14px; }
   .form-grid { grid-template-columns: 1fr; }
   .project-color-layout { grid-template-columns: 1fr; }
   .project-color-preview { width: 100%; height: 62px; }
