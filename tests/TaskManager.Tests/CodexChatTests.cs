@@ -1,0 +1,175 @@
+using System.Text.Json;
+using TaskManager.Configuration;
+using TaskManager.Services;
+
+namespace TaskManager.Tests;
+
+/// <summary>実タスクへ触れず会話の競合、復旧、承認境界を検証する。</summary>
+public static class CodexChatTests
+{
+    public static async Task VerifyAsync()
+    {
+        // 一時領域と偽サーバーで送信、承認、切断を再現する。
+        string? previousDirectory = Environment.GetEnvironmentVariable("TASKMANAGER_DATA_DIR");
+        string directory = Path.Combine(Path.GetTempPath(), "unitodo-chat-test-" + Guid.NewGuid().ToString("N"));
+        Environment.SetEnvironmentVariable("TASKMANAGER_DATA_DIR", directory);
+        try
+        {
+            FakeServer server = new();
+            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+            ChatSnapshot initial = await service.GetAsync();
+            Assert(server.StartConfiguration.GetProperty("sandbox").GetString() == "read-only", "Sandbox must be restricted");
+            Assert(server.StartConfiguration.GetProperty("approvalPolicy").GetString() == "on-request", "Approvals must remain enabled");
+            ChatSubmission request = new(initial.Conversation, Guid.NewGuid().ToString(), "テスト依頼本文");
+            await Task.WhenAll(service.SendAsync(request), service.SendAsync(request));
+            Assert(server.SendCount == 1, "Duplicate requests must not run twice");
+            await RejectAsync(() => service.SendAsync(request with { Text = "別の依頼" }));
+            await RejectAsync(() => service.SendAsync(request with { RequestIdentifier = Guid.NewGuid().ToString() }));
+            await RejectAsync(() => service.NewAsync(initial.Conversation));
+            server.Emit(new { method = "item/agentMessage/delta", @params = new { threadId = "other-thread", turnId = "turn-one", itemId = "message", delta = "別会話" } });
+            server.Emit(new { method = "item/agentMessage/delta", @params = new { threadId = "test-thread", turnId = "turn-one", itemId = "message", delta = "応答" } });
+            Assert(service.Snapshot().Messages.Single().Text == "応答", "Unowned notifications must not appear");
+            server.Emit(new { id = "approval-one", method = "item/commandExecution/requestApproval", @params = new { threadId = "test-thread", turnId = "turn-one", itemId = "command", command = "read-only-test", reason = "確認用" } });
+            string approval = service.Snapshot().Prompts.Single().Identifier;
+            await service.AnswerAsync(new(approval, "accept", null));
+            await RejectAsync(() => service.AnswerAsync(new(approval, "accept", null)));
+            Assert(server.Replies.Count == 1 && server.Replies[0].GetProperty("decision").GetString() == "accept", "Approval must be single-use");
+            server.Emit(new { id = 42, method = "item/tool/requestUserInput", @params = new { threadId = "test-thread", turnId = "turn-one", itemId = "question", questions = new[] { new { id = "choice", header = "確認", question = "選択してください" } } } });
+            string question = service.Snapshot().Prompts.Single().Identifier;
+            await RejectAsync(() => service.AnswerAsync(new(question, "accept", null)));
+            Assert(service.Snapshot().Prompts.Length == 1, "Validation must not consume a question");
+            await service.AnswerAsync(new(question, "accept", new() { ["choice"] = ["回答"] }));
+            Assert(server.Replies[1].GetProperty("answers").GetProperty("choice").GetProperty("answers")[0].GetString() == "回答", "Question answer must match protocol");
+            await service.InterruptAsync(initial.Conversation);
+            Assert(service.Snapshot().Status == "idle", "Interrupt must release active turn");
+            string stored = File.ReadAllText(Path.Combine(directory, "codex-chat-state.json"));
+            Assert(!stored.Contains("テスト依頼本文") && !stored.Contains("回答"), "App state must not persist conversation content");
+            CodexChatService restored = new(new FakeServer(), new TaskManagerPaths(), new UiChangeNotifier());
+            await restored.GetAsync();
+            await restored.SendAsync(request);
+            Assert(restored.Snapshot().Status == "idle", "Restart must retain deduplication receipts");
+            ChatSnapshot next = await service.NewAsync(initial.Conversation);
+            await RejectAsync(() => service.SendAsync(request));
+            server.FailSend = true;
+            ChatSubmission uncertain = new(next.Conversation, Guid.NewGuid().ToString(), "通信不明テスト");
+            await RejectAsync(() => service.SendAsync(uncertain));
+            Assert(service.Snapshot().Status == "uncertain", "Unknown result must not report success");
+            await service.ReconnectAsync(next.Conversation);
+            await service.SendAsync(uncertain);
+            Assert(server.SendCount == 2, "Unknown request must not be automatically retried");
+            server.CutConnection();
+            Assert(service.Snapshot().Status == "uncertain", "Disconnect must surface uncertainty");
+            await service.GetAsync();
+            Assert(service.Snapshot().Status == "idle", "Reconnect must recover history");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TASKMANAGER_DATA_DIR", previousDirectory);
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    public static async Task<int> LiveAsync()
+    {
+        // 実環境のログインとプロトコルだけを検証し、タスクの読取や変更は行わない。
+        string? previousDirectory = Environment.GetEnvironmentVariable("TASKMANAGER_DATA_DIR");
+        string directory = Path.Combine(Path.GetTempPath(), "unitodo-codex-smoke-" + Guid.NewGuid().ToString("N"));
+        Environment.SetEnvironmentVariable("TASKMANAGER_DATA_DIR", directory);
+        try
+        {
+            await using CodexAppServer server = new();
+            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+            ChatSnapshot initial = await service.GetAsync();
+            await service.SendAsync(new(initial.Conversation, Guid.NewGuid().ToString(), "接続の動作確認です。ツールやスキルの読込み、外部データの参照・変更は一切せず、「接続確認できました」とだけ回答してください。"));
+            for (int attempt = 0; attempt < 120; attempt++)
+            {
+                await Task.Delay(1000);
+                ChatSnapshot state = service.Snapshot();
+                if (state.Prompts.Length > 0) throw new InvalidOperationException("Unexpected approval during no-tool smoke test");
+                if (state.Status == "idle")
+                {
+                    Assert(state.Error is null && state.Messages.Any(message => message.Role == "assistant" && message.Text.Contains("接続確認")), "Live Codex response missing: " + state.Error);
+                    Console.WriteLine("PASS live App Server: initialization, turn streaming, completion");
+                    await service.ReconnectAsync(initial.Conversation);
+                    Assert(service.Snapshot().Messages.Any(message => message.Role == "assistant"), "Live history missing");
+                    Console.WriteLine("PASS live App Server: durable history read");
+                    return 0;
+                }
+            }
+            throw new TimeoutException("Live Codex turn did not complete");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("TASKMANAGER_DATA_DIR", previousDirectory);
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    private static void Assert(bool condition, string message)
+    {
+        // 期待した状態でなければテストを失敗させる。
+        if (!condition) throw new InvalidOperationException(message);
+    }
+
+    private static async Task RejectAsync(Func<Task<ChatSnapshot>> action)
+    {
+        // 利用者向け検証エラーで拒否されることを確認する。
+        try { await action(); }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException) { return; }
+        throw new InvalidOperationException("Expected rejection");
+    }
+
+    private sealed class FakeServer : ICodexAppServer
+    {
+        // 要求回数、返信、設定と障害注入状態を保持する。
+        public int SendCount { get; private set; }
+        public bool FailSend { get; set; }
+        public List<JsonElement> Replies { get; } = [];
+        public JsonElement StartConfiguration { get; private set; }
+        public event Action<JsonElement>? MessageReceived;
+        public event Action? Disconnected;
+
+        public Task<JsonElement> CallAsync(string method, object parameters)
+        {
+            // 実通信せず、順序の異なる通知と応答を再現する。
+            if (method is "thread/start" or "thread/resume" or "thread/read")
+            {
+                StartConfiguration = JsonSerializer.SerializeToElement(parameters);
+                return Task.FromResult(JsonSerializer.SerializeToElement(new { thread = new { id = "test-thread", turns = Array.Empty<object>() } }));
+            }
+            if (method == "turn/start")
+            {
+                SendCount++;
+                if (FailSend) throw new InvalidOperationException("Simulated send failure");
+                Emit(new { method = "turn/started", @params = new { threadId = "test-thread", turn = new { id = "turn-one", status = "inProgress" } } });
+            }
+            if (method == "turn/interrupt") Emit(new { method = "turn/completed", @params = new { threadId = "test-thread", turn = new { id = "turn-one", status = "interrupted", items = Array.Empty<object>() } } });
+            return Task.FromResult(JsonSerializer.SerializeToElement(new { turn = new { id = "turn-one", status = "inProgress" } }));
+        }
+
+        public Task ReplyAsync(JsonElement identifier, object result)
+        {
+            // 承認内容の検証用に返信だけを記録する。
+            Replies.Add(JsonSerializer.SerializeToElement(result));
+            return Task.CompletedTask;
+        }
+
+        public void Emit(object message)
+        {
+            // 通知やサーバー要求をサービスへ即時配送する。
+            MessageReceived?.Invoke(JsonSerializer.SerializeToElement(message));
+        }
+
+        public void CutConnection()
+        {
+            // 通信断通知を意図的に発生させる。
+            Disconnected?.Invoke();
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            // 偽サーバーには解放する外部資源がない。
+            return ValueTask.CompletedTask;
+        }
+    }
+}

@@ -1,0 +1,30 @@
+/* PCでは右側、Androidでは全面に会話を表示する。 */
+.assistant-panel { position: fixed; inset: 12px 12px 12px auto; width: min(520px, calc(100vw - 24px)); z-index: 1500; display: flex; flex-direction: column; background: #fff; color: #24322e; border: 1px solid #d6dfda; border-radius: 18px; box-shadow: 0 12px 60px #143b322b; overflow: hidden; }
+.assistant-header, .assistant-toolbar, .assistant-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.assistant-header { padding: 14px 18px 6px; }
+.assistant-header h2 { font-size: 18px; margin: 0; }
+.assistant-toolbar { padding: 8px 18px; border-bottom: 1px solid #e2e8e4; font-size: 13px; }
+.assistant-messages { flex: 1; overflow: auto; min-height: 80px; padding: 16px; overscroll-behavior: contain; }
+.assistant-message { margin-bottom: 16px; padding: 12px; border-radius: 12px; background: #f5f7f5; overflow-wrap: anywhere; }
+.assistant-message strong { display: block; font-size: 12px; margin-bottom: 6px; color: #59675d; }
+.assistant-message div { white-space: pre-wrap; line-height: 1.65; }
+.assistant-user { background: #e8f3ec; margin-left: 28px; }
+.assistant-activity { font-size: 12px; color: #536258; border-left: 3px solid #b8cabd; }
+.assistant-activity div { max-height: 150px; overflow: auto; }
+.assistant-empty { color: #68766d; }
+.assistant-error { padding: 10px 18px; margin: 0; color: #8b322b; background: #fff0ed; font-size: 13px; max-height: 110px; overflow: auto; }
+.assistant-prompts { max-height: 40%; overflow: auto; background: #fffbec; }
+.assistant-prompt { padding: 14px 18px; border-top: 1px solid #e8dcb8; }
+.assistant-prompt pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; font-size: 12px; }
+.assistant-prompt label { display: grid; gap: 6px; margin: 8px 0; }
+.assistant-prompt input { width: 100%; box-sizing: border-box; }
+.assistant-prompt button { margin: 6px 8px 0 0; }
+.assistant-composer { padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #e2e8e4; display: grid; gap: 8px; }
+.assistant-composer label { font-size: 13px; }
+.assistant-composer textarea { resize: vertical; width: 100%; min-height: 70px; max-height: 180px; box-sizing: border-box; font: inherit; padding: 10px; border: 1px solid #b7c9bf; border-radius: 10px; }
+.assistant-composer small { color: #68766d; font-size: 11px; }
+@media (max-width: 680px) {
+  .assistant-panel { inset: 0; width: 100%; height: 100dvh; border: 0; border-radius: 0; }
+  .assistant-composer textarea, .assistant-prompt input { font-size: 16px; }
+  .assistant-panel button { min-height: 40px; }
+}

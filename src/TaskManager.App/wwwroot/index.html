@@ -417,6 +417,21 @@
     </form>
   </dialog>
 
-  <script src="app.js?v=20260909-01" defer></script>
+  <aside id="assistant-panel" class="assistant-panel hidden" aria-label="Codexでタスク管理">
+    <header class="assistant-header"><h2>Codexでタスク管理</h2><button id="assistant-close" type="button" class="icon-button" aria-label="会話を閉じる">×</button></header>
+    <div class="assistant-toolbar"><span id="assistant-status" role="status">接続中…</span><button id="assistant-reconnect" type="button" class="secondary-button">履歴を再取得</button><button id="assistant-new" type="button" class="secondary-button">新しい会話</button></div>
+    <p id="assistant-error" class="assistant-error hidden" role="alert"></p>
+    <div id="assistant-messages" class="assistant-messages" aria-label="会話履歴"></div>
+    <div id="assistant-prompts" class="assistant-prompts"></div>
+    <form id="assistant-form" class="assistant-composer">
+      <label for="assistant-text">依頼・回答</label>
+      <textarea id="assistant-text" rows="3" maxlength="20000" placeholder="今やることを教えて" required></textarea>
+      <div class="assistant-actions"><button id="assistant-stop" type="button" class="secondary-button" disabled>停止</button><button id="assistant-send" type="submit" class="primary-button" disabled>送信</button></div>
+      <small>閉じてもPCで処理を継続します。停止しても実行済みの変更は戻りません。</small>
+    </form>
+  </aside>
+  <link rel="stylesheet" href="assistant.css?v=20260909-02">
+  <script src="assistant.js?v=20260909-02" defer></script>
+  <script src="app.js?v=20260909-02" defer></script>
 </body>
 </html>

@@ -25,6 +25,7 @@ Copyright (c) 2026 uniuni ([https://x.com/lept_on](https://x.com/lept_on))
 - Google Calendarの読取専用同期と予定前後10分の余白
 - 朝の最優先通知、推奨時間＋10分後の完了確認、30世代のSQLiteバックアップ
 - 別Codexスレッドから操作できるCLI
+- PC・Android共通のCodex会話画面（App Server経由の送信、応答、質問・承認、停止）
 - F13からOllamaとTypeWhisperを必要時だけ自動起動し、校正した音声入力を確認・編集して指定CodexタスクへCLI送信
 
 ## 開発環境の準備
@@ -57,6 +58,8 @@ pwsh -NoProfile -File .\scripts\install.ps1
 インストール先は`%LOCALAPPDATA%\Programs\TaskManager`、データ保存先は`%LOCALAPPDATA%\TaskManager`です。デスクトップには`UniToDo`ショートカット、ログオン時の自動起動にはWindowsタスク`UniToDo Watchdog`が設定され、`http://127.0.0.1:48120`だけで待ち受けます。
 
 Androidから利用する場合は、[スマートフォンアクセス](docs/TaskManager-Vault/11_スマートフォンアクセス.md)に沿って本人限定のTailscale Serveを設定します。PCはログオン済み・スリープなしで稼働させます。
+
+「Codexでタスク管理」はWeb画面内で会話できます。PCに導入済みのCodex CLIとログインを使用します。音声入力の指定会話とは独立しています。詳細は[Codex会話](docs/TaskManager-Vault/12_Codex会話.md)を参照してください。
 
 ## GitHubからの入手と頒布
 

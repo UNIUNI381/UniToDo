@@ -137,6 +137,7 @@ public static class Program
         application.UseDefaultFiles();
         application.UseStaticFiles(new StaticFileOptions { OnPrepareResponse = ConfigureStaticFileResponse });
         application.MapTaskManagerApi();
+        application.MapCodexChat();
         application.MapFallbackToFile("index.html");
 
         DatabaseInitializer databaseInitializer = application.Services.GetRequiredService<DatabaseInitializer>();
@@ -317,6 +318,8 @@ public static class Program
         services.AddSingleton<CodexReviewService>();
         services.AddSingleton<CodexSubmissionQueue>();
         services.AddSingleton<CodexDesktopLauncher>();
+        services.AddSingleton<ICodexAppServer, CodexAppServer>();
+        services.AddSingleton<CodexChatService>();
         services.AddSingleton<ICodexProcessExecutor, CodexProcessExecutor>();
         services.AddSingleton<ICodexCommandRunner, CodexCommandRunner>();
         services.AddSingleton(new VoiceInputCoordinatorOptions());

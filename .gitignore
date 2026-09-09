@@ -54,3 +54,5 @@ appsettings.*.Local.json
 .DS_Store
 Thumbs.db
 Desktop.ini
+codex-chat-state.json
+codex-chat-state.json.tmp

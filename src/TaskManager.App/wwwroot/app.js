@@ -118,7 +118,7 @@ async function initializeApplication() {
     // 認証済み接続経路を読み、PC固有操作を初期表示から除外する。
     const access = await apiRequest("/api/v1/access");
     applicationState.remoteAccess = access.remote;
-    for (const localControl of document.querySelectorAll('[data-open-codex-task-thread], .nav-button[data-view="settings"]')) {
+    for (const localControl of document.querySelectorAll('.nav-button[data-view="settings"]')) {
       localControl.classList.toggle("hidden", applicationState.remoteAccess);
     }
     // 作業ログを初回から保存色で描画できるようプロジェクトを先に読み込む。
@@ -376,27 +376,10 @@ async function apiRequest(path, options = {}) {
   return responseBody;
 }
 
-/** Codexのタスク管理スレッドをデスクトップアプリで開く。 */
+/** PCとスマホで共用するCodex会話パネルを開く。 */
 async function openCodexTaskThread() {
-  // サーバー側でプロセスを起動せず、クリック元のブラウザからCodexへURIを渡す。
-  try {
-    const launchResult = await apiRequest("/api/v1/codex/task-thread/open", {
-      method: "POST",
-      body: "{}"
-    });
-    if (!launchResult.threadLink?.startsWith("codex://threads/")) {
-      throw new Error("Codexタスクのリンクを取得できませんでした。");
-    }
-    const launchLink = document.createElement("a");
-    launchLink.href = launchResult.threadLink;
-    launchLink.hidden = true;
-    document.body.appendChild(launchLink);
-    launchLink.click();
-    launchLink.remove();
-    showNotice("Codexのタスク管理スレッドを開きました。");
-  } catch (error) {
-    showNotice(error.message, true);
-  }
+  // 外部アプリへの移動をなくし、同じ会話をこの画面に表示する。
+  await window.unitodoAssistant.open();
 }
 
 /** 現在の推薦を読み込んでダッシュボードへ表示する。 */
