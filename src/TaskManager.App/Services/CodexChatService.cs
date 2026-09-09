@@ -73,14 +73,23 @@ public sealed class CodexChatService
         if (!File.Exists(skillPath)) throw new InvalidOperationException("タスク操作スキルが見つかりません。UniToDoを再インストールしてください。");
         string instructions = "あなたはUniToDoのタスク管理アシスタントです。日本語で短く回答してください。"
             + "タスク操作には必ず $manage-local-tasks を読み、その scripts/invoke-taskctl.ps1 のみを使ってください。"
+            + "通常のタスク操作に必要なスキル読取りとラッパー実行は承認済みです。スクリプトを実行してよいかの確認は不要です。"
+            + "PowerShellスクリプトは powershell -NoProfile -ExecutionPolicy Bypass -File に絶対パスを渡して実行してください。"
+            + "ただし対象や依頼内容が曖昧な場合、削除やスキルで指定された業務上の確認は省略しないでください。"
             + "SQLite・APIの直接操作、ソース編集、プログラム開発は行わないでください。"
             + "実行できない処理は制約を説明してください。既存の音声用会話や他のCodex会話を操作しないでください。"
             + "確認が必要な場合は質問して回答を待ってください。スキル絶対パス: " + skillPath;
         Dictionary<string, object?> configuration = new()
         {
-            ["cwd"] = workspace, ["model"] = "gpt-5.6-luna", ["sandbox"] = "read-only",
-            ["approvalPolicy"] = "on-request", ["approvalsReviewer"] = "user", ["developerInstructions"] = instructions,
-            ["config"] = new Dictionary<string, object> { ["model_reasoning_effort"] = "low" }
+            ["cwd"] = workspace, ["model"] = "gpt-5.6-luna", ["sandbox"] = "workspace-write",
+            ["approvalPolicy"] = "never", ["approvalsReviewer"] = "user", ["developerInstructions"] = instructions,
+            ["config"] = new Dictionary<string, object>
+            {
+                ["model_reasoning_effort"] = "low",
+                // CLI配置先だけを追加し、正本DBや開発リポジトリへの書込み権限は付けない。
+                ["sandbox_workspace_write.writable_roots"] = new[] { AppContext.BaseDirectory },
+                ["sandbox_workspace_write.network_access"] = false
+            }
         };
         string? existingThread;
         lock (stateLock) existingThread = stored.Thread;
@@ -146,7 +155,9 @@ public sealed class CodexChatService
                 {
                     threadId = stored.Thread, clientUserMessageId = submission.RequestIdentifier,
                     input = new object[] { new { type = "text", text = submission.Text }, new { type = "skill", name = "manage-local-tasks", path = skillPath } },
-                    effort = "low", approvalPolicy = "on-request", approvalsReviewer = "user"
+                    effort = "low", approvalPolicy = "never", approvalsReviewer = "user",
+                    // 復元済み会話にも毎回同じ限定権限を適用し、旧設定へ戻ることを防ぐ。
+                    sandboxPolicy = new { type = "workspaceWrite", writableRoots = new[] { workspace, AppContext.BaseDirectory }, networkAccess = false }
                 });
                 lock (stateLock)
                 {

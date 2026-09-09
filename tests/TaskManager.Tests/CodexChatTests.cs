@@ -18,11 +18,16 @@ public static class CodexChatTests
             FakeServer server = new();
             CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
             ChatSnapshot initial = await service.GetAsync();
-            Assert(server.StartConfiguration.GetProperty("sandbox").GetString() == "read-only", "Sandbox must be restricted");
-            Assert(server.StartConfiguration.GetProperty("approvalPolicy").GetString() == "on-request", "Approvals must remain enabled");
+            Assert(server.StartConfiguration.GetProperty("sandbox").GetString() == "workspace-write", "Sandbox must remain restricted to workspace");
+            Assert(server.StartConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Routine execution must not prompt");
+            JsonElement configuration = server.StartConfiguration.GetProperty("config");
+            Assert(!configuration.GetProperty("sandbox_workspace_write.network_access").GetBoolean(), "Network must remain restricted");
+            Assert(configuration.GetProperty("sandbox_workspace_write.writable_roots").EnumerateArray().Single().GetString() == AppContext.BaseDirectory, "Only CLI installation may be added");
             ChatSubmission request = new(initial.Conversation, Guid.NewGuid().ToString(), "テスト依頼本文");
             await Task.WhenAll(service.SendAsync(request), service.SendAsync(request));
             Assert(server.SendCount == 1, "Duplicate requests must not run twice");
+            Assert(server.TurnConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Each turn must retain no-prompt policy");
+            Assert(!server.TurnConfiguration.GetProperty("sandboxPolicy").GetProperty("networkAccess").GetBoolean(), "Each turn must retain network restriction");
             await RejectAsync(() => service.SendAsync(request with { Text = "別の依頼" }));
             await RejectAsync(() => service.SendAsync(request with { RequestIdentifier = Guid.NewGuid().ToString() }));
             await RejectAsync(() => service.NewAsync(initial.Conversation));
@@ -69,7 +74,7 @@ public static class CodexChatTests
         }
     }
 
-    public static async Task<int> LiveAsync()
+    public static async Task<int> LiveAsync(bool verifyTaskCommand = false)
     {
         // 実環境のログインとプロトコルだけを検証し、タスクの読取や変更は行わない。
         string? previousDirectory = Environment.GetEnvironmentVariable("TASKMANAGER_DATA_DIR");
@@ -78,9 +83,26 @@ public static class CodexChatTests
         try
         {
             await using CodexAppServer server = new();
+            // 実CLI試験では成功したコマンド出力を確認し、モデルの自己申告だけに依存しない。
+            bool commandSucceeded = false;
+            server.MessageReceived += envelope =>
+            {
+                // 実タスク本文は出力せず、ラッパー経由の読取成功マーカーだけを検査する。
+                if (envelope.TryGetProperty("method", out JsonElement method) && method.GetString() == "item/completed")
+                {
+                    JsonElement item = envelope.GetProperty("params").GetProperty("item");
+                    if (item.GetProperty("type").GetString() == "commandExecution"
+                        && item.TryGetProperty("exitCode", out JsonElement exitCode) && exitCode.ValueKind == JsonValueKind.Number && exitCode.GetInt32() == 0
+                        && item.GetProperty("command").GetString()!.Contains("invoke-taskctl.ps1")
+                        && item.GetProperty("aggregatedOutput").GetString()!.Contains("TASKCTL_OK")) commandSucceeded = true;
+                }
+            };
             CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
             ChatSnapshot initial = await service.GetAsync();
-            await service.SendAsync(new(initial.Conversation, Guid.NewGuid().ToString(), "接続の動作確認です。ツールやスキルの読込み、外部データの参照・変更は一切せず、「接続確認できました」とだけ回答してください。"));
+            string prompt = verifyTaskCommand
+                ? "通常のタスク操作権限を確認します。指定スキルのinvoke-taskctl.ps1をpowershell -NoProfile -ExecutionPolicy Bypass -Fileで呼び、list --jsonを1回だけ実行してください。出力はPowerShellの変数に格納し、終了コード0かつJSON解析成功のときだけTASKCTL_OKを出力してください。タスク名・内容やJSON原文は出力しないでください。データは変更しないでください。成功した場合は「接続確認できました」とだけ回答してください。"
+                : "接続の動作確認です。ツールやスキルの読込み、外部データの参照・変更は一切せず、「接続確認できました」とだけ回答してください。";
+            await service.SendAsync(new(initial.Conversation, Guid.NewGuid().ToString(), prompt));
             for (int attempt = 0; attempt < 120; attempt++)
             {
                 await Task.Delay(1000);
@@ -89,6 +111,7 @@ public static class CodexChatTests
                 if (state.Status == "idle")
                 {
                     Assert(state.Error is null && state.Messages.Any(message => message.Role == "assistant" && message.Text.Contains("接続確認")), "Live Codex response missing: " + state.Error);
+                    Assert(!verifyTaskCommand || commandSucceeded, "Routine task CLI must succeed without approval");
                     Console.WriteLine("PASS live App Server: initialization, turn streaming, completion");
                     await service.ReconnectAsync(initial.Conversation);
                     Assert(service.Snapshot().Messages.Any(message => message.Role == "assistant"), "Live history missing");
@@ -126,6 +149,8 @@ public static class CodexChatTests
         public bool FailSend { get; set; }
         public List<JsonElement> Replies { get; } = [];
         public JsonElement StartConfiguration { get; private set; }
+        // 各送信で適用された権限設定を保持する。
+        public JsonElement TurnConfiguration { get; private set; }
         public event Action<JsonElement>? MessageReceived;
         public event Action? Disconnected;
 
@@ -139,6 +164,7 @@ public static class CodexChatTests
             }
             if (method == "turn/start")
             {
+                TurnConfiguration = JsonSerializer.SerializeToElement(parameters);
                 SendCount++;
                 if (FailSend) throw new InvalidOperationException("Simulated send failure");
                 Emit(new { method = "turn/started", @params = new { threadId = "test-thread", turn = new { id = "turn-one", status = "inProgress" } } });
