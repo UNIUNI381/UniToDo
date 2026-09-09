@@ -2,6 +2,8 @@
 
 // 画面全体で共有する現在データを保持する。
 const applicationState = {
+  // サーバーで判定したリモート接続状態を保持する。
+  remoteAccess: false,
   tasks: [],
   // プロジェクト画面とタスク選択肢で共有する集約を保持する。
   projects: [],
@@ -113,6 +115,12 @@ async function initializeApplication() {
     applicationState.timeTrackingRefreshTimerIdentifier = window.setInterval(refreshVisibleTimeTracker, 30000);
   }
   try {
+    // 認証済み接続経路を読み、PC固有操作を初期表示から除外する。
+    const access = await apiRequest("/api/v1/access");
+    applicationState.remoteAccess = access.remote;
+    for (const localControl of document.querySelectorAll('[data-open-codex-task-thread], .nav-button[data-view="settings"]')) {
+      localControl.classList.toggle("hidden", applicationState.remoteAccess);
+    }
     // 作業ログを初回から保存色で描画できるようプロジェクトを先に読み込む。
     await loadProjects();
     await Promise.all([loadDashboard(), loadSettings()]);
@@ -313,6 +321,8 @@ function closeCustomFilterMenus() {
 
 /** 指定画面へ切り替えて最新データを読み込む。 */
 async function switchView(viewName) {
+  // 再読込で保存された設定タブもリモート接続時は開かない。
+  if (applicationState.remoteAccess && viewName === "settings") return;
   // 表示状態とナビゲーション選択状態を同期する。
   const previousViewName = applicationState.activeView;
   applicationState.activeView = viewName;

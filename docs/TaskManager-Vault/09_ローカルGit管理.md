@@ -28,6 +28,7 @@ Vaultでは`.obsidian/app.json`と`.obsidian/.gitignore`を追跡します。リ
 - `credentials.json`、OAuthトークン、環境変数ファイル、秘密鍵・証明書秘密鍵
 - Obsidianの`workspace*.json`、`appearance.json`、`core-plugins.json`、ローカルプラグインとキャッシュ
 - `%LOCALAPPDATA%\TaskManager`にある正本データ、設定、ログ、インストール済み実行物
+- `remote-access.json`と、端末内に生成する`tailscale-policy-proposal.json`の実値。接続先・本人識別子をVaultやGitへ記録しない。
 
 除外対象のサンプルや公開鍵をテスト資産として追加する必要が生じた場合は、対象を確認してから`.gitignore`へ狭い例外を追加します。
 

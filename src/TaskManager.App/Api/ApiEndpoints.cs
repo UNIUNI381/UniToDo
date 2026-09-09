@@ -22,6 +22,7 @@ public static class ApiEndpoints
         // 読取、更新、カレンダー、保全の経路を機能別に登録する。
         RouteGroupBuilder api = application.MapGroup("/api/v1");
         api.MapGet("/health", GetHealth);
+        api.MapGet("/access", GetAccess);
         api.MapGet("/changes", StreamUiChangesAsync);
         api.MapGet("/system-incidents/pending", GetPendingSystemIncidentAsync);
         api.MapPost("/system-incidents/{identifier}/acknowledge", AcknowledgeSystemIncidentAsync);
@@ -68,6 +69,13 @@ public static class ApiEndpoints
         api.MapPost("/calendar/connect", ConnectCalendarAsync);
         api.MapPost("/calendar/synchronize", SynchronizeCalendarAsync);
         api.MapPost("/backup", CreateBackupAsync);
+    }
+
+    /// <summary>画面が接続経路に合わせてPC専用操作を隠すための情報を返す。</summary>
+    private static IResult GetAccess(HttpContext context)
+    {
+        // 個人識別子や端末設定はブラウザへ渡さない。
+        return Results.Ok(new { remote = context.Items[LocalRequestMiddleware.RemoteAccessItem] is true });
     }
 
     /// <summary>プロセスが応答可能であることを返す。</summary>

@@ -296,6 +296,9 @@ public static class Program
         // 状態を共有するサービスは単一インスタンスとして登録する。
         services.AddSingleton<TimeProvider>(TimeProvider.System);
         services.AddSingleton<TaskManagerPaths>();
+        services.AddSingleton(provider => RemoteAccessSettings.Load(
+            Path.Combine(provider.GetRequiredService<TaskManagerPaths>().DataDirectory, "remote-access.json"),
+            provider.GetRequiredService<ILogger<RemoteAccessSettings>>()));
         services.AddSingleton<SystemIncidentService>();
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<TaskRepository>();

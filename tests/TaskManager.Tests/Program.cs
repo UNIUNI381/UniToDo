@@ -28,6 +28,7 @@ public static class Program
     public static async Task<int> Main()
     {
         // 中核ロジック、保存層、自動処理、性能をまとめて検証する。
+        await RunTestAsync("Tailscale Serveとローカル接続の信頼境界を守る", RemoteAccessTests.VerifyAsync);
         await RunTestAsync("正式表示名と内部識別子を分離する", TestApplicationDisplayNameAsync);
         await RunTestAsync("画面変更を複数接続へ通知する", TestUiChangeNotifierAsync);
         await RunTestAsync("成功したデータ更新APIだけを画面へ通知する", TestUiChangeNotificationMiddlewareAsync);

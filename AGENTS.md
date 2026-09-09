@@ -31,6 +31,7 @@
 - 発行・インストールはPowerShell 7で実行する。`pwsh -NoProfile -File ./scripts/publish.ps1`、`pwsh -NoProfile -File ./scripts/install.ps1`を使用し、Windows PowerShell 5.1の`powershell`では実行しない。
 - OpenAI API、Apps Script、Google Sheets同期、外部公開用サーバーを追加しない。
 - Webサーバーの待受先を `127.0.0.1:48120` 以外へ広げない。
+- Androidからの接続はTailscale ServeのHTTPS中継だけを許可する。Funnelによる一般公開は行わない。本人限定のGrant・端末承認を主な認証とし、本体は正規Host・Origin・Serve利用者情報とPC固有APIの制限を検証する。独自ログイン・パスワード・OAuth/OIDC認証は追加しない。
 - ローカルUniToDo本体（開発名`TaskManager`）のGoogle Calendar API連携は `calendar.readonly` 以外の権限を要求しない。この制約はローカルアプリの同期機能だけに適用する。
 - ユーザーがGoogle Calendarへの予定作成・更新・削除を明示した場合、接続済みのGoogle Calendarプラグインを使用できる。プラグインの権限をローカルアプリの `calendar.readonly` と混同しない。
 

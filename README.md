@@ -1,6 +1,6 @@
 # UniToDo
 
-仕事と私用を一括評価し、「今やること」を1件だけ返すWindows専用タスク管理システムです。.NET 10、ASP.NET Core、SQLite、常駐トレイ、`taskctl`で構成され、タスク・自由活動の作業時間もローカルへ記録します。OpenAI API、Apps Script、外部サーバーは使いません。
+仕事と私用を一括評価し、「今やること」を1件だけ返すWindows専用タスク管理システムです。.NET 10、ASP.NET Core、SQLite、常駐トレイ、`taskctl`で構成され、タスク・自由活動の作業時間もローカルへ記録します。OpenAI API、Apps Script、業務データを保存する外部サーバーは使いません。Androidからは任意のTailscale Serve経由で接続できます。
 
 利用者向けの正式名称は「UniToDo」です。互換性維持のため、実行ファイル、ソリューション、名前空間、保存先などの開発上の名前は`TaskManager`のままです。
 
@@ -55,6 +55,8 @@ pwsh -NoProfile -File .\scripts\install.ps1
 ```
 
 インストール先は`%LOCALAPPDATA%\Programs\TaskManager`、データ保存先は`%LOCALAPPDATA%\TaskManager`です。デスクトップには`UniToDo`ショートカット、ログオン時の自動起動にはWindowsタスク`UniToDo Watchdog`が設定され、`http://127.0.0.1:48120`だけで待ち受けます。
+
+Androidから利用する場合は、[スマートフォンアクセス](docs/TaskManager-Vault/11_スマートフォンアクセス.md)に沿って本人限定のTailscale Serveを設定します。PCはログオン済み・スリープなしで稼働させます。
 
 ## GitHubからの入手と頒布
 

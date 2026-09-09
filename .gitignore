@@ -43,6 +43,8 @@ credentials.json
 token.json
 client_secret*.json
 secrets.json
+remote-access.json
+tailscale-policy-proposal.json
 appsettings.Local.json
 appsettings.*.Local.json
 *.pfx
