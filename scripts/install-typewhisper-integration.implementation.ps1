@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$ProjectRoot,
-    [switch]$WhatIf)
+    [switch]$WhatIf,
+    [switch]$CorrectionScriptOnly)
 
 . (Join-Path $ProjectRoot "scripts\common.ps1")
 
@@ -184,6 +185,23 @@ function Update-TypeWhisperHotkeys {
         $settings | Add-Member -NotePropertyName apiServerPort -NotePropertyValue 8978
     }
     $settings | ConvertTo-Json -Depth 20 | Set-Content -Encoding utf8 $typeWhisperSettingsPath
+}
+
+# 校正処理だけの更新は既存配置を確認し、設定やプラグインに触れずバックアップ後に差し替える。
+if ($CorrectionScriptOnly) {
+    if (-not (Test-Path -LiteralPath $ollamaScriptPath -PathType Leaf)) {
+        throw '校正スクリプトが未導入です。通常の連携導入を先に実行してください。'
+    }
+    $scriptText = Get-Content -LiteralPath $ollamaScriptSourcePath -Raw -Encoding utf8
+    [void][ScriptBlock]::Create($scriptText)
+    Write-Output "Ollama script: $ollamaScriptPath"
+    if (-not $WhatIf) {
+        New-Item -ItemType Directory -Path $backupDirectory -Force | Out-Null
+        Copy-Item -LiteralPath $ollamaScriptPath -Destination (Join-Path $backupDirectory 'Invoke-OllamaTypeWhisper.ps1')
+        Install-OllamaCorrectionScript
+        Write-Output "Correction script installed. Backup: $backupDirectory"
+    }
+    return
 }
 
 # 事前検査と変更対象表示を行い、WhatIfでは外部状態を変更せず終了する。

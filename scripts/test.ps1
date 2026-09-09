@@ -9,6 +9,9 @@ Push-Location $ProjectRoot
 try {
     & $dotNetExecutable run --project "tests\TaskManager.Tests\TaskManager.Tests.csproj" --no-build
     if ($LASTEXITCODE -ne 0) { throw "Tests failed." }
+    # 日本語の校正テストをPowerShell 5.1でも同じ文字コードで読み込む。
+    $correctionTests = Get-Content -Raw -Encoding utf8 (Join-Path $ProjectRoot "tests\Test-OllamaCorrection.ps1")
+    & ([ScriptBlock]::Create($correctionTests)) -ProjectRoot $ProjectRoot
     & (Join-Path $PSScriptRoot "verify.ps1")
 }
 finally {
