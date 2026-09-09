@@ -48,9 +48,14 @@ public sealed class LocalRequestMiddleware(RequestDelegate next, RemoteAccessSet
         string suppliedOrigin = context.Request.Headers.Origin.ToString();
         bool invalidOrigin = suppliedOrigin.Length > 0
             && !string.Equals(suppliedOrigin, expectedOrigin, StringComparison.OrdinalIgnoreCase);
+        // Androidのホーム起動など、別サイト扱いになる最上位の画面表示だけを許可する。
+        bool isDocumentNavigation = HttpMethods.IsGet(context.Request.Method)
+            && context.Request.Headers["Sec-Fetch-Mode"] == "navigate"
+            && context.Request.Headers["Sec-Fetch-Dest"] == "document"
+            && (context.Request.Path == "/" || context.Request.Path == "/index.html");
         if ((!isLocal && !isRemote) || invalidOrigin
             || (isRemote && isMutation && suppliedOrigin.Length == 0)
-            || context.Request.Headers["Sec-Fetch-Site"] == "cross-site")
+            || (context.Request.Headers["Sec-Fetch-Site"] == "cross-site" && !isDocumentNavigation))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsJsonAsync(new { error = "接続元または送信元URLが許可されていません。" });

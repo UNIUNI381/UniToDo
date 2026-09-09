@@ -37,6 +37,17 @@ public static class RemoteAccessTests
         await CheckAsync("missing update header", settings, true, "/api/v1/tasks", "POST", settings.ServeOrigin, "missing-header", 403);
         await CheckAsync("local cross origin", settings, false, "/api/v1/tasks", "POST", "https://attacker.example", null, 403);
         await CheckAsync("cross site navigation", settings, false, "/", "GET", null, "cross-site", 403);
+        // ホーム画面からの最上位GETだけを通し、同じヘッダーでAPIや更新へ到達させない。
+        await CheckAsync("Android home launch", settings, true, "/", "GET", null, "navigation", 204);
+        await CheckAsync("Android index launch", settings, true, "/index.html", "GET", null, "navigation", 204);
+        await CheckAsync("local document launch", settings, false, "/", "GET", null, "navigation", 204);
+        await CheckAsync("navigation API denied", settings, true, "/api/v1/tasks", "GET", null, "navigation", 403);
+        await CheckAsync("navigation POST denied", settings, true, "/", "POST", settings.ServeOrigin, "navigation", 403);
+        await CheckAsync("embedded launch denied", settings, true, "/", "GET", null, "navigation-iframe", 403);
+        await CheckAsync("fetch launch denied", settings, true, "/", "GET", null, "navigation-fetch", 403);
+        await CheckAsync("unauthenticated launch denied", settings, true, "/", "GET", null, "navigation-no-user", 403);
+        await CheckAsync("disabled launch denied", new(), true, "/", "GET", null, "navigation", 403);
+        await CheckAsync("wrong origin launch denied", settings, true, "/", "GET", "https://attacker.example", "navigation", 403);
         foreach (string path in new[] { "/api/v1/codex/reviews", "/API/V1/CODEX/task-thread/open/", "/api/v1/calendar/credentials", "/api/v1/calendar/connect/", "/api/v1/backup", "/api/v1/settings/" })
         {
             // UIの非表示だけに依存せず、同じ経路の直接呼出しも拒否する。
@@ -83,8 +94,18 @@ public static class RemoteAccessTests
             context.Request.Headers["X-Forwarded-Proto"] = "https";
             context.Request.Headers["X-Forwarded-For"] = "100.64.0.2";
         }
+        // Androidランチャーからの起動をユーザー操作ヘッダーの有無に依存せず再現する。
+        if (variation?.StartsWith("navigation", StringComparison.Ordinal) == true)
+        {
+            context.Request.Headers["Sec-Fetch-Site"] = "cross-site";
+            context.Request.Headers["Sec-Fetch-Mode"] = "navigate";
+            context.Request.Headers["Sec-Fetch-Dest"] = "document";
+        }
         switch (variation)
         {
+            case "navigation-iframe": context.Request.Headers["Sec-Fetch-Dest"] = "iframe"; break;
+            case "navigation-fetch": context.Request.Headers["Sec-Fetch-Mode"] = "cors"; break;
+            case "navigation-no-user": context.Request.Headers.Remove("Tailscale-User-Login"); break;
             case "other-user": context.Request.Headers["Tailscale-User-Login"] = "other@example.com"; break;
             case "missing-user": context.Request.Headers.Remove("Tailscale-User-Login"); break;
             case "duplicate-user": context.Request.Headers.Append("Tailscale-User-Login", "owner@example.com"); break;
