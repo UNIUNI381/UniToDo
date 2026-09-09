@@ -4,7 +4,7 @@
 
 PCとAndroidの「Codexでタスク管理」は、UniToDo内の同じ専用会話を開きます。PCでは右パネル、スマホでは全面表示です。外部のCodexアプリへ移動せず、本文送信、逐次応答、質問への回答、今回のみの実行承認・拒否、停止、履歴再取得、新しい会話を扱います。履歴は末尾200項目、各本文は最大64,000文字を表示します。独自ターミナルや任意RPCは公開しません。
 
-`assistant.js` → `/api/v1/assistant` → `CodexChatService` → `ICodexAppServer` → `codex app-server --listen stdio://`で接続します。App Serverのネットワーク待受は作りません。既存のPC側Codex CLIとChatGPTログインを利用し、OpenAI APIや独自の認証情報保存は追加しません。モデルは音声送信と同じ`gpt-5.6-luna`、推論は`low`です。検証したCLIは0.146.0です。プロトコル変更時はインストール済みCLIの`generate-json-schema`と公式資料で互換性を確認します。
+`assistant.js` → `/api/v1/assistant` → `CodexChatService` → `ICodexAppServer` → `codex app-server --listen stdio://`で接続します。App Serverのネットワーク待受は作りません。既存のPC側Codex CLIとChatGPTログインを利用し、OpenAI APIや独自の認証情報保存は追加しません。モデルは音声送信と同じ`gpt-5.6-luna`、推論は`low`、サービスティアは`fast`です。検証したCLIは0.146.0です。プロトコル変更時はインストール済みCLIの`generate-json-schema`と公式資料で互換性を確認します。
 
 ## 実行と保存
 

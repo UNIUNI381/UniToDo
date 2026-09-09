@@ -81,7 +81,7 @@ public sealed class CodexChatService
             + "確認が必要な場合は質問して回答を待ってください。スキル絶対パス: " + skillPath;
         Dictionary<string, object?> configuration = new()
         {
-            ["cwd"] = workspace, ["model"] = "gpt-5.6-luna", ["sandbox"] = "workspace-write",
+            ["cwd"] = workspace, ["model"] = "gpt-5.6-luna", ["serviceTier"] = "fast", ["sandbox"] = "workspace-write",
             ["approvalPolicy"] = "never", ["approvalsReviewer"] = "user", ["developerInstructions"] = instructions,
             ["config"] = new Dictionary<string, object>
             {
@@ -155,7 +155,7 @@ public sealed class CodexChatService
                 {
                     threadId = stored.Thread, clientUserMessageId = submission.RequestIdentifier,
                     input = new object[] { new { type = "text", text = submission.Text }, new { type = "skill", name = "manage-local-tasks", path = skillPath } },
-                    effort = "low", approvalPolicy = "never", approvalsReviewer = "user",
+                    effort = "low", serviceTier = "fast", approvalPolicy = "never", approvalsReviewer = "user",
                     // 復元済み会話にも毎回同じ限定権限を適用し、旧設定へ戻ることを防ぐ。
                     sandboxPolicy = new { type = "workspaceWrite", writableRoots = new[] { workspace, AppContext.BaseDirectory }, networkAccess = false }
                 });

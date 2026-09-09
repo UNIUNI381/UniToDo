@@ -20,6 +20,7 @@ public static class CodexChatTests
             ChatSnapshot initial = await service.GetAsync();
             Assert(server.StartConfiguration.GetProperty("sandbox").GetString() == "workspace-write", "Sandbox must remain restricted to workspace");
             Assert(server.StartConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Routine execution must not prompt");
+            Assert(server.StartConfiguration.GetProperty("serviceTier").GetString() == "fast", "Web conversation must request fast service tier");
             JsonElement configuration = server.StartConfiguration.GetProperty("config");
             Assert(!configuration.GetProperty("sandbox_workspace_write.network_access").GetBoolean(), "Network must remain restricted");
             Assert(configuration.GetProperty("sandbox_workspace_write.writable_roots").EnumerateArray().Single().GetString() == AppContext.BaseDirectory, "Only CLI installation may be added");
@@ -27,6 +28,7 @@ public static class CodexChatTests
             await Task.WhenAll(service.SendAsync(request), service.SendAsync(request));
             Assert(server.SendCount == 1, "Duplicate requests must not run twice");
             Assert(server.TurnConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Each turn must retain no-prompt policy");
+            Assert(server.TurnConfiguration.GetProperty("serviceTier").GetString() == "fast", "Each turn must retain fast service tier");
             Assert(!server.TurnConfiguration.GetProperty("sandboxPolicy").GetProperty("networkAccess").GetBoolean(), "Each turn must retain network restriction");
             await RejectAsync(() => service.SendAsync(request with { Text = "別の依頼" }));
             await RejectAsync(() => service.SendAsync(request with { RequestIdentifier = Guid.NewGuid().ToString() }));
