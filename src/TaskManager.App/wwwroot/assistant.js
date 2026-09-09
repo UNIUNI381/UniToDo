@@ -11,6 +11,43 @@
   let messageSignature = "";
   let pendingSubmission = null;
   let pollTimer = null;
+  // キーボード開閉前の末尾追従状態とViewport更新の予約を保持する。
+  let followLatest = true;
+  let viewportFrame = null;
+
+  function updateViewport() {
+    // Androidの表示可能領域へ高さと位置を合わせ、キーボード背後へのはみ出しを防ぐ。
+    viewportFrame = null;
+    if (panel.classList.contains("hidden")) return;
+    const mobile = window.matchMedia("(max-width: 680px)").matches;
+    const viewport = window.visualViewport;
+    const height = viewport?.height ?? window.innerHeight;
+    const keepLatest = followLatest || document.activeElement === textInput;
+    if (mobile) {
+      panel.style.setProperty("--assistant-viewport-height", `${height}px`);
+      panel.style.setProperty("--assistant-viewport-top", `${viewport?.offsetTop ?? 0}px`);
+    } else {
+      panel.style.removeProperty("--assistant-viewport-height");
+      panel.style.removeProperty("--assistant-viewport-top");
+    }
+    panel.classList.toggle("assistant-compact", mobile && height < 480);
+    // レイアウト更新後の末尾へ合わせ、過去履歴を読んでいる場合は位置を維持する。
+    if (keepLatest) messageList.scrollTop = messageList.scrollHeight;
+  }
+
+  function scheduleViewport() {
+    // キーボードのアニメーション中に重なる通知を描画単位にまとめる。
+    if (viewportFrame === null) viewportFrame = window.requestAnimationFrame(updateViewport);
+  }
+
+  messageList.addEventListener("scroll", () => {
+    // 利用者が過去の発言を読んでいるかをリサイズ前に保持する。
+    followLatest = messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 100;
+  }, { passive: true });
+  window.addEventListener("resize", scheduleViewport, { passive: true });
+  window.visualViewport?.addEventListener("resize", scheduleViewport, { passive: true });
+  window.visualViewport?.addEventListener("scroll", scheduleViewport, { passive: true });
+  textInput.addEventListener("focus", scheduleViewport);
 
   function showError(message) {
     // エラーはHTMLとして解釈せず、パネル内へ表示する。
@@ -153,8 +190,12 @@
       // PCでは右パネル、狭い画面では全面パネルとして開く。
       const wasHidden = panel.classList.contains("hidden");
       panel.classList.remove("hidden");
+      followLatest = true;
+      updateViewport();
       if (wasHidden) await poll();
       textInput.focus({ preventScroll: true });
+      messageList.scrollTop = messageList.scrollHeight;
+      scheduleViewport();
     }
   };
 

@@ -4,7 +4,8 @@
 .assistant-header { padding: 14px 18px 6px; }
 .assistant-header h2 { font-size: 18px; margin: 0; }
 .assistant-toolbar { padding: 8px 18px; border-bottom: 1px solid #e2e8e4; font-size: 13px; }
-.assistant-messages { flex: 1; overflow: auto; min-height: 80px; padding: 16px; overscroll-behavior: contain; }
+.assistant-messages { flex: 1; overflow: auto; min-height: 0; padding: 16px; overscroll-behavior: contain; }
+.assistant-header, .assistant-toolbar, .assistant-composer { flex-shrink: 0; }
 .assistant-message { margin-bottom: 16px; padding: 12px; border-radius: 12px; background: #f5f7f5; overflow-wrap: anywhere; }
 .assistant-message strong { display: block; font-size: 12px; margin-bottom: 6px; color: #59675d; }
 .assistant-message div { white-space: pre-wrap; line-height: 1.65; }
@@ -24,7 +25,15 @@
 .assistant-composer textarea { resize: vertical; width: 100%; min-height: 70px; max-height: 180px; box-sizing: border-box; font: inherit; padding: 10px; border: 1px solid #b7c9bf; border-radius: 10px; }
 .assistant-composer small { color: #68766d; font-size: 11px; }
 @media (max-width: 680px) {
-  .assistant-panel { inset: 0; width: 100%; height: 100dvh; border: 0; border-radius: 0; }
+  .assistant-panel { inset: var(--assistant-viewport-top, 0px) 0 auto; width: 100%; height: var(--assistant-viewport-height, 100dvh); border: 0; border-radius: 0; }
   .assistant-composer textarea, .assistant-prompt input { font-size: 16px; }
   .assistant-panel button { min-height: 40px; }
+  /* キーボードで縦方向が縮んだ場合も会話と入力操作の領域を確保する。 */
+  .assistant-compact .assistant-header { padding-top: 6px; }
+  .assistant-compact .assistant-toolbar { padding-block: 4px; }
+  .assistant-compact .assistant-composer { padding-block: 6px; gap: 4px; }
+  .assistant-compact .assistant-composer label, .assistant-compact .assistant-composer small { display: none; }
+  .assistant-compact .assistant-composer textarea { height: 56px; min-height: 48px; max-height: 80px; }
+  .assistant-compact .assistant-prompts { max-height: 25%; }
+  .assistant-compact .assistant-error { max-height: 50px; }
 }
