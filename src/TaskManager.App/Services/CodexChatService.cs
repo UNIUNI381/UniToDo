@@ -61,7 +61,12 @@ public sealed class CodexChatService
     {
         // 初回表示で履歴を復元し、待機中は同じスナップショットだけを返す。
         await actions.WaitAsync();
-        try { await EnsureReadyAsync(); return Snapshot(); }
+        try
+        {
+            if (Snapshot().Status != "archived") await EnsureReadyAsync();
+            return Snapshot();
+        }
+        catch (InvalidOperationException exception) when (TryMarkArchived(exception)) { return Snapshot(); }
         finally { actions.Release(); }
     }
 
@@ -155,6 +160,7 @@ public sealed class CodexChatService
         await actions.WaitAsync();
         try
         {
+            if (Snapshot().Status == "archived") throw new InvalidOperationException("接続先はアーカイブ済みです。「新しい会話」を開始してください。");
             await EnsureReadyAsync();
             string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(submission.Text)));
             lock (stateLock)
@@ -203,7 +209,34 @@ public sealed class CodexChatService
             }
             return Snapshot();
         }
+        catch (InvalidOperationException exception) when (TryMarkArchived(exception))
+        {
+            // 拒否された入力を成功扱いせず、画面の入力欄と受付済み記録を維持する。
+            throw new InvalidOperationException("接続先はアーカイブ済みです。「新しい会話」を開始してください。", exception);
+        }
         finally { actions.Release(); }
+    }
+
+    private bool TryMarkArchived(InvalidOperationException exception)
+    {
+        // CLIのアーカイブ専用エラーだけを識別し、通信障害や実行結果不明と区別する。
+        lock (stateLock)
+        {
+            if (stored.Thread is null || !exception.Message.Contains($"session {stored.Thread} is archived", StringComparison.OrdinalIgnoreCase)) return false;
+            MarkArchived();
+            return true;
+        }
+    }
+
+    private void MarkArchived()
+    {
+        // 会話識別子と受付を保持して新規作成への入口を残し、アーカイブ解除は行わない。
+        status = "archived";
+        error = "接続先の会話はアーカイブ済みです。「新しい会話」から再開できます。";
+        ready = false;
+        turn = null;
+        prompts.Clear();
+        ResponseAvailable?.Invoke(Snapshot());
     }
 
     private async Task<object[]> BuildTurnInputAsync(string text)
@@ -247,10 +280,15 @@ public sealed class CodexChatService
             lock (stateLock)
             {
                 CheckConversation(conversation);
-                if (status != "idle") throw new InvalidOperationException("停止または現在の処理が完了してから新しい会話を開始してください。");
+                if (status is not ("idle" or "archived")) throw new InvalidOperationException("停止または現在の処理が完了してから新しい会話を開始してください。");
                 stored = new(Guid.NewGuid().ToString("N"), null, []);
                 Save();
                 ready = false;
+                status = "idle";
+                error = null;
+                turn = null;
+                prompts.Clear();
+                messages.Clear();
             }
             await EnsureReadyAsync();
             return Snapshot();
@@ -285,6 +323,7 @@ public sealed class CodexChatService
             }
             return Snapshot();
         }
+        catch (InvalidOperationException exception) when (TryMarkArchived(exception)) { return Snapshot(); }
         finally { actions.Release(); }
     }
 
@@ -360,6 +399,8 @@ public sealed class CodexChatService
         lock (stateLock)
         {
             if (Text(parameters, "threadId") != stored.Thread) return;
+            if (method == "thread/archived") { MarkArchived(); return; }
+            if (status == "archived") return;
             string notificationTurn = Text(parameters, "turnId");
             if (turn is not null && notificationTurn.Length > 0 && notificationTurn != turn) return;
             if (envelope.TryGetProperty("id", out JsonElement identifier))
@@ -433,6 +474,7 @@ public sealed class CodexChatService
         // 接続切断時に承認を無効化し、再接続で履歴を読み直す。
         lock (stateLock)
         {
+            if (status == "archived") return;
             status = "uncertain";
             error = "Codexとの接続が切れました。履歴を確認するまで依頼を再送しないでください。";
             prompts.Clear();

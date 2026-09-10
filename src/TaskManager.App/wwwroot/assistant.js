@@ -67,11 +67,11 @@
   function render(state) {
     // 差分がある部分だけ更新し、入力中の質問回答を維持する。
     snapshot = state;
-    const labels = { idle: "送信できます", running: "処理中…", uncertain: "接続・実行結果を確認してください" };
+    const labels = { idle: "送信できます", running: "処理中…", uncertain: "接続・実行結果を確認してください", archived: "アーカイブ済み・新しい会話を開始できます" };
     document.getElementById("assistant-status").textContent = state.prompts.length ? "確認待ち" : labels[state.status] || state.status;
     document.getElementById("assistant-send").disabled = busy || state.status !== "idle";
-    document.getElementById("assistant-new").disabled = busy || state.status !== "idle";
-    document.getElementById("assistant-stop").disabled = busy || state.status === "idle";
+    document.getElementById("assistant-new").disabled = busy || !["idle", "archived"].includes(state.status);
+    document.getElementById("assistant-stop").disabled = busy || ["idle", "archived"].includes(state.status);
     const messages = JSON.stringify(state.messages);
     if (messages !== messageSignature) {
       const followBottom = messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 100;

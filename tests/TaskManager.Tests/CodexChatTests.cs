@@ -109,6 +109,7 @@ public static class CodexChatTests
             completedVoice = await voice.SendAsync(new() { ThreadIdentifier = service.Snapshot().Conversation, ReviewIdentifier = Guid.NewGuid().ToString("N"), Text = "結果不明の音声" }, CancellationToken.None);
             Assert(!completedVoice.IsSuccess && !completedVoice.CanRetry, "Uncertain voice submissions must not be requeued");
             await VerifyApplicationsAsync();
+            await VerifyArchivedAsync();
         }
         finally
         {
@@ -151,6 +152,57 @@ public static class CodexChatTests
         server.Applications = JsonSerializer.SerializeToElement(new { apps = Array.Empty<object>() });
         await service.SendAsync(retry);
         Assert(server.SendCount == previousSendCount + 1, "Retry after discovery recovery must run exactly once");
+    }
+
+    private static async Task VerifyArchivedAsync()
+    {
+        // アーカイブ済みの保存会話を再開できなくても、会話IDを返して新規作成へ進める。
+        FakeServer server = new() { ArchivedMethod = "thread/resume" };
+        TaskManagerPaths paths = new();
+        string originalState = File.ReadAllText(Path.Combine(paths.DataDirectory, "codex-chat-state.json"));
+        CodexChatService service = new(server, paths, new UiChangeNotifier());
+        ChatSnapshot archived = await service.GetAsync();
+        Assert(archived.Status == "archived" && !string.IsNullOrWhiteSpace(archived.Conversation)
+            && archived.Error!.Contains("新しい会話"), "Archived resume must return a recoverable snapshot");
+        await service.GetAsync();
+        Assert(server.Methods.Count(method => method == "thread/resume") == 1, "Polling must not repeatedly resume archived threads");
+        Assert(File.ReadAllText(Path.Combine(paths.DataDirectory, "codex-chat-state.json")) == originalState,
+            "Archived detection must retain receipts and must not replace the conversation automatically");
+        await RejectAsync(() => service.SendAsync(new(archived.Conversation, Guid.NewGuid().ToString(), "送信拒否")));
+        Assert(server.SendCount == 0, "Archived threads must reject new input");
+        ChatSnapshot replacement = await service.NewAsync(archived.Conversation);
+        Assert(replacement.Status == "idle" && replacement.Conversation != archived.Conversation && replacement.Error is null,
+            "Explicit new conversation must recover from an archived thread");
+        Assert(server.Methods.Count(method => method == "thread/start") == 1 && !server.Methods.Contains("thread/unarchive"),
+            "Recovery must start once and preserve the old archive");
+        await RejectAsync(() => service.NewAsync(archived.Conversation));
+
+        // 接続後にアーカイブされ、送信時に拒否された場合にも同じ復旧状態へ遷移する。
+        server.ArchivedMethod = "turn/start";
+        await RejectAsync(() => service.SendAsync(new(replacement.Conversation, Guid.NewGuid().ToString(), "送信時にアーカイブ")));
+        Assert(service.Snapshot().Status == "archived", "Archived send rejection must not remain uncertain");
+        server.ArchivedMethod = null;
+        ChatSnapshot restored = await service.ReconnectAsync(replacement.Conversation);
+        Assert(restored.Status == "idle", "Explicit reconnect must detect an externally unarchived thread");
+        server.ArchivedMethod = "thread/read";
+        Assert((await service.ReconnectAsync(replacement.Conversation)).Status == "archived", "Archived history read must remain recoverable");
+
+        // 無関係な会話の通知を無視し、対象のアーカイブ後に古い完了通知で状態を戻さない。
+        server.ArchivedMethod = null;
+        replacement = await service.NewAsync(replacement.Conversation);
+        server.Emit(new { method = "thread/archived", @params = new { threadId = "another-thread" } });
+        Assert(service.Snapshot().Status == "idle", "Unowned archive notifications must be ignored");
+        server.Emit(new { method = "thread/archived", @params = new { threadId = "test-thread" } });
+        server.Emit(new { method = "turn/completed", @params = new { threadId = "test-thread", turn = new { id = "turn-one", status = "completed" } } });
+        server.CutConnection();
+        Assert(service.Snapshot().Status == "archived", "Late notifications and disconnect must retain archived recovery");
+
+        // 一般的な通信障害はアーカイブ扱いせず、自動的な会話切替を行わない。
+        FakeServer failedServer = new() { FailResume = true };
+        CodexChatService failedService = new(failedServer, paths, new UiChangeNotifier());
+        await RejectAsync(failedService.GetAsync);
+        Assert(failedService.Snapshot().Status != "archived" && !failedServer.Methods.Contains("thread/start"),
+            "Unrelated resume failures must not be treated as archive evidence");
     }
 
     public static async Task<int> LiveAsync(bool verifyTaskCommand = false, bool verifyCalendar = false)
@@ -243,6 +295,10 @@ public static class CodexChatTests
         // 要求回数、返信、設定と障害注入状態を保持する。
         public int SendCount { get; private set; }
         public bool FailSend { get; set; }
+        // アーカイブ専用エラーと一般障害、呼出メソッド一覧を保持する。
+        public string? ArchivedMethod { get; set; }
+        public bool FailResume { get; set; }
+        public List<string> Methods { get; } = [];
         // 接続アプリの現在状態、要求設定と取得失敗を保持する。
         public bool FailApplications { get; set; }
         public JsonElement AppConfiguration { get; private set; }
@@ -263,6 +319,9 @@ public static class CodexChatTests
         public Task<JsonElement> CallAsync(string method, object parameters)
         {
             // 実通信せず、順序の異なる通知と応答を再現する。
+            Methods.Add(method);
+            if (method == ArchivedMethod) throw new InvalidOperationException("Codex: session test-thread is archived. Run codex unarchive first.");
+            if (method == "thread/resume" && FailResume) throw new InvalidOperationException("Simulated connection failure");
             if (method == "app/installed")
             {
                 AppConfiguration = JsonSerializer.SerializeToElement(parameters);
