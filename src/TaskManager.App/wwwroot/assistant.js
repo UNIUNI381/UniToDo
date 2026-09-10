@@ -193,17 +193,26 @@
       followLatest = true;
       updateViewport();
       if (wasHidden) await poll();
+      if (panel.classList.contains("hidden")) return;
       textInput.focus({ preventScroll: true });
       messageList.scrollTop = messageList.scrollHeight;
       scheduleViewport();
     }
   };
 
-  document.getElementById("assistant-close").addEventListener("click", () => {
+  function closePanel() {
     // 表示だけを閉じてPC側の実行状態は維持する。
     panel.classList.add("hidden");
     window.clearTimeout(pollTimer);
-  });
+  }
+
+  document.getElementById("assistant-close").addEventListener("click", closePanel);
+  document.addEventListener("click", (event) => {
+    // PCの欄外クリックで閉じ、パネル内と開くボタンの操作はそのまま受け付ける。
+    if (window.matchMedia("(max-width: 680px)").matches || panel.classList.contains("hidden")) return;
+    if (panel.contains(event.target) || event.target instanceof Element && event.target.closest("[data-open-codex-task-thread]")) return;
+    closePanel();
+  }, { capture: true });
   document.getElementById("assistant-new").addEventListener("click", async () => {
     // 既存会話はCodex側に残し、利用する会話だけ切り替える。
     if (snapshot && window.confirm("新しい会話に切り替えますか？ 現在の履歴はCodex側に残ります。")) {
