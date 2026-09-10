@@ -129,29 +129,23 @@ public sealed class TaskManagerTray(
         _ = Task.Run(() => voiceInput.StartAsync(lifetime.ApplicationStopping));
     }
 
-    /// <summary>録音開始後にCLI事前起動を非同期で要求する。</summary>
+    /// <summary>録音開始後にApp Server準備を非同期で要求する。</summary>
     private void PrepareCodexProcess()
     {
         // 録音操作とUIスレッドを待たせず、起動負荷を分散する。
         _ = PrepareCodexProcessAsync();
     }
 
-    /// <summary>録音開始から2秒ずらして本文待機CLIを準備する。</summary>
+    /// <summary>録音開始から2秒ずらして共有会話を準備する。</summary>
     private async Task PrepareCodexProcessAsync()
     {
-        // アプリ終了時は遅延も取り消し、未設定や準備失敗は録音に影響させない。
+        // アプリ終了時は遅延も取り消し、準備失敗は録音に影響させない。
         try
         {
             await Task.Delay(TimeSpan.FromSeconds(2), lifetime.ApplicationStopping).ConfigureAwait(false);
-            TaskManagerSettings settings = await services.GetRequiredService<TaskRepository>()
-                .GetSettingsAsync().ConfigureAwait(false);
             lifetime.ApplicationStopping.ThrowIfCancellationRequested();
-            if (string.IsNullOrWhiteSpace(settings.CodexThreadIdentifier))
-            {
-                return;
-            }
-            services.GetRequiredService<ICodexCommandRunner>().Prepare(settings.CodexThreadIdentifier);
-            WriteVoiceReviewLog("Codex CLIを本文待機で事前起動しました。");
+            await services.GetRequiredService<CodexChatService>().GetAsync().ConfigureAwait(false);
+            WriteVoiceReviewLog("Codex App Serverの共有会話を準備しました。");
         }
         catch (OperationCanceledException) when (lifetime.ApplicationStopping.IsCancellationRequested)
         {
@@ -160,7 +154,7 @@ public sealed class TaskManagerTray(
         catch (Exception)
         {
             // 送信時に通常起動へ戻すため、本文や送信先を含む例外はログへ残さない。
-            WriteVoiceReviewLog("Codex CLIの事前起動を見送りました。送信時に通常起動します。");
+            WriteVoiceReviewLog("Codex App Serverの準備を見送りました。送信時に再接続します。");
         }
     }
 
@@ -179,7 +173,7 @@ public sealed class TaskManagerTray(
         Volatile.Read(ref trayContext)?.RequestCodexReview();
     }
 
-    /// <summary>確認待ちの先頭を設定済み送信先とともに表示する。</summary>
+    /// <summary>確認待ちの先頭を共有会話とともに表示する。</summary>
     private async Task ShowNextCodexReviewAsync()
     {
         // 表示中画面がある場合は閉じた後の再要求に任せる。
@@ -201,13 +195,11 @@ public sealed class TaskManagerTray(
         try
         {
             WriteVoiceReviewLog($"確認待ちを表示中へ移しました。待機件数={waitingCount}");
-            TaskRepository repository = services.GetRequiredService<TaskRepository>();
-            TaskManagerSettings settings = await repository.GetSettingsAsync().ConfigureAwait(false);
-            string threadIdentifier = CodexThreadIdentifier.Normalize(settings.CodexThreadIdentifier);
-            WriteVoiceReviewLog("送信先設定を読み込み、UIスレッドへ表示を要求します。");
+            string threadIdentifier = services.GetRequiredService<CodexChatService>().Snapshot().Conversation;
+            WriteVoiceReviewLog("共有会話を選択し、UIスレッドへ表示を要求します。");
             await applicationContext.ShowCodexReviewAsync(
                 reviewItem,
-                threadIdentifier,
+                "Web画面と共通の会話",
                 waitingCount,
                 (item, text) => SendCodexReviewAsync(item, text, threadIdentifier),
                 DiscardCodexReview);
@@ -248,7 +240,7 @@ public sealed class TaskManagerTray(
         }
     }
 
-    /// <summary>編集済み本文をCodex CLI送信キューへ追加する。</summary>
+    /// <summary>編集済み本文をCodex共有会話の送信キューへ追加する。</summary>
     private Task<string?> SendCodexReviewAsync(
         CodexReviewItem reviewItem,
         string text,
@@ -258,6 +250,8 @@ public sealed class TaskManagerTray(
         try
         {
             CodexReviewService.ValidateText(text);
+            if (text.Length > 20000)
+                return Task.FromResult<string?>("送信本文は20,000文字以内に編集してください。");
             submissions.Enqueue(new CodexSubmission
             {
                 ReviewIdentifier = reviewItem.Identifier,

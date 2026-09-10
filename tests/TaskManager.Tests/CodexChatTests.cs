@@ -68,6 +68,36 @@ public static class CodexChatTests
             Assert(service.Snapshot().Status == "uncertain", "Disconnect must surface uncertainty");
             await service.GetAsync();
             Assert(service.Snapshot().Status == "idle", "Reconnect must recover history");
+
+            // 音声も同じ会話と単一実行制御を使い、完了応答をWindows表示へ渡す。
+            CodexVoiceChatRunner voice = new(service);
+            TaskManager.Domain.CodexSubmission voiceSubmission = new()
+            {
+                ThreadIdentifier = service.Snapshot().Conversation,
+                ReviewIdentifier = Guid.NewGuid().ToString("N"),
+                Text = "音声の確認済み本文"
+            };
+            server.FailSend = false;
+            Task<TaskManager.Domain.CodexCommandResult> voiceResult = voice.SendAsync(voiceSubmission, CancellationToken.None);
+            Assert(server.TurnConfiguration.GetProperty("threadId").GetString() == "test-thread", "Voice must use the Web thread");
+            Assert(server.TurnConfiguration.GetProperty("input")[0].GetProperty("text").GetString() == voiceSubmission.Text, "Voice text must reach App Server unchanged");
+            await RejectAsync(() => service.SendAsync(new(voiceSubmission.ThreadIdentifier, Guid.NewGuid().ToString(), "同時Web送信")));
+            server.Emit(new { method = "turn/completed", @params = new { threadId = "test-thread", turn = new { id = "turn-one", status = "completed", items = new[] { new { id = "voice-response", type = "agentMessage", text = "音声への回答" } } } } });
+            TaskManager.Domain.CodexCommandResult completedVoice = await voiceResult;
+            Assert(completedVoice.IsSuccess && completedVoice.OutputMessage == "音声への回答", "Voice must display its response");
+
+            // 追加質問はWebへ引き継ぎ、勝手な回答や再送を行わない。
+            voiceSubmission = new() { ThreadIdentifier = service.Snapshot().Conversation, ReviewIdentifier = Guid.NewGuid().ToString("N"), Text = "追加確認の依頼" };
+            voiceResult = voice.SendAsync(voiceSubmission, CancellationToken.None);
+            server.Emit(new { id = "voice-question", method = "item/tool/requestUserInput", @params = new { threadId = "test-thread", turnId = "turn-one", questions = new[] { new { id = "choice", question = "確認" } } } });
+            completedVoice = await voiceResult;
+            Assert(completedVoice.IsSuccess && service.Snapshot().Prompts.Length == 1, "Voice questions must remain available in Web UI");
+            await service.InterruptAsync(voiceSubmission.ThreadIdentifier);
+
+            // 送信結果不明は確認キューへ戻せない結果として返す。
+            server.FailSend = true;
+            completedVoice = await voice.SendAsync(new() { ThreadIdentifier = service.Snapshot().Conversation, ReviewIdentifier = Guid.NewGuid().ToString("N"), Text = "結果不明の音声" }, CancellationToken.None);
+            Assert(!completedVoice.IsSuccess && !completedVoice.CanRetry, "Uncertain voice submissions must not be requeued");
         }
         finally
         {

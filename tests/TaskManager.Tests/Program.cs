@@ -1253,6 +1253,15 @@ public static class Program
             && notificationService.Details[0].IsError
             && notificationService.Details[0].Message.Contains("テスト失敗", StringComparison.Ordinal),
             "CLI失敗内容が詳細画面へ渡されませんでした。");
+
+        // 受付後の結果不明では確認キューへ戻さず履歴確認を案内する。
+        reviewService.CompleteActive(submission.ReviewIdentifier);
+        CodexSubmissionWorker uncertainWorker = new(
+            new CodexSubmissionQueue(),
+            new FixedCodexCommandRunner(new CodexCommandResult { CanRetry = false, ErrorMessage = "履歴を確認してください。" }),
+            reviewService, notificationService, NullLogger<CodexSubmissionWorker>.Instance);
+        await uncertainWorker.ProcessSubmissionAsync(submission, CancellationToken.None);
+        Assert(!reviewService.TryActivateNext(out _, out _), "結果不明の送信が再確認へ戻されました。");
     }
 
     /// <summary>Codex CLIの成功応答が中央下の詳細画面へ渡されることを検証する。</summary>

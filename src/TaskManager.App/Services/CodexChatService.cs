@@ -5,7 +5,7 @@ using TaskManager.Configuration;
 
 namespace TaskManager.Services;
 
-// Webと将来の音声入力で共用する送信・確認・表示データを定義する。
+// Webと音声入力で共用する送信・確認・表示データを定義する。
 public sealed record ChatSubmission(string Conversation, string RequestIdentifier, string Text);
 public sealed record ChatAnswer(string Identifier, string Action, Dictionary<string, string[]>? Answers);
 public sealed record ChatMessage(string Identifier, string Role, string Text);
@@ -36,6 +36,9 @@ public sealed class CodexChatService
     private string? error;
     private bool ready;
 
+    // 音声送信へ完了・確認待ち・切断時点の表示内容を渡す通知を保持する。
+    public event Action<ChatSnapshot>? ResponseAvailable;
+
     public CodexChatService(ICodexAppServer server, TaskManagerPaths paths, UiChangeNotifier changes)
     {
         // 会話内容はCodex側へ保存し、アプリには識別子と送信重複防止情報だけを保存する。
@@ -63,6 +66,13 @@ public sealed class CodexChatService
     {
         // 更新中のコレクションを直接公開せずコピーする。
         lock (stateLock) return new(stored.Conversation, status, error, messages.ToArray(), prompts.Values.Select(value => value.Prompt).ToArray());
+    }
+
+    public bool HasReceipt(string conversation, string requestIdentifier)
+    {
+        // 現在の会話に保存済みの受付があるかを照合する。
+        lock (stateLock) return stored.Conversation == conversation
+            && stored.Receipts.Any(receipt => receipt.Identifier == requestIdentifier.Replace("-", ""));
     }
 
     private async Task EnsureReadyAsync()
@@ -315,6 +325,7 @@ public sealed class CodexChatService
                 JsonElement? questions = parameters.TryGetProperty("questions", out JsonElement requestedQuestions) ? requestedQuestions.Clone() : null;
                 ChatPrompt prompt = new(promptIdentifier, kind, Limit(description), questions);
                 prompts[promptIdentifier] = (identifier.Clone(), method, parameters.Clone(), prompt);
+                ResponseAvailable?.Invoke(Snapshot());
                 return;
             }
             if (method == "serverRequest/resolved" && parameters.TryGetProperty("requestId", out JsonElement resolved))
@@ -337,6 +348,7 @@ public sealed class CodexChatService
                     : Text(completed, "status") == "interrupted" ? "処理を停止しました。実行済みの変更は取り消されません。" : null;
                 turn = null;
                 prompts.Clear();
+                ResponseAvailable?.Invoke(Snapshot());
                 changes.Publish("codex", "");
             }
         }
@@ -373,6 +385,7 @@ public sealed class CodexChatService
             error = "Codexとの接続が切れました。履歴を確認するまで依頼を再送しないでください。";
             prompts.Clear();
             ready = false;
+            ResponseAvailable?.Invoke(Snapshot());
         }
     }
 

@@ -320,8 +320,7 @@ public static class Program
         services.AddSingleton<CodexDesktopLauncher>();
         services.AddSingleton<ICodexAppServer, CodexAppServer>();
         services.AddSingleton<CodexChatService>();
-        services.AddSingleton<ICodexProcessExecutor, CodexProcessExecutor>();
-        services.AddSingleton<ICodexCommandRunner, CodexCommandRunner>();
+        services.AddSingleton<ICodexCommandRunner, CodexVoiceChatRunner>();
         services.AddSingleton(new VoiceInputCoordinatorOptions());
         services.AddHttpClient<TypeWhisperApiClient>(client =>
         {

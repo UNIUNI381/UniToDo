@@ -239,11 +239,8 @@
           </article>
           <article class="settings-card">
             <h2>Codex音声入力</h2>
-            <label>
-              送信先タスクIDまたはディープリンク
-              <input name="codexThreadIdentifier" type="text" required placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-              <small class="field-help">ご自身のCodexタスクのUUIDまたはcodex://threads/&lt;UUID&gt;を指定します。未設定時は音声送信せず、設定案内を表示します。</small>
-            </label>
+            <p>音声入力はWeb画面の「Codexでタスク管理」と同じ会話へ送信します。追加の質問への回答や停止はWeb画面で操作できます。</p>
+            <input name="codexThreadIdentifier" type="hidden">
           </article>
           <article class="settings-card">
             <h2>Google Calendar</h2>

@@ -59,7 +59,7 @@ pwsh -NoProfile -File .\scripts\install.ps1
 
 Androidから利用する場合は、[スマートフォンアクセス](docs/TaskManager-Vault/11_スマートフォンアクセス.md)に沿って本人限定のTailscale Serveを設定します。PCはログオン済み・スリープなしで稼働させます。
 
-「Codexでタスク管理」はWeb画面内で会話できます。PCに導入済みのCodex CLIとログインを使用します。音声入力の指定会話とは独立しています。詳細は[Codex会話](docs/TaskManager-Vault/12_Codex会話.md)を参照してください。
+「Codexでタスク管理」はWeb画面内で会話できます。PCに導入済みのCodex CLIとログインを使用します。音声入力も同じ会話へ送信します。詳細は[Codex会話](docs/TaskManager-Vault/12_Codex会話.md)を参照してください。
 
 ## GitHubからの入手と頒布
 
@@ -91,12 +91,12 @@ TypeWhisperを終了し、最初に`-WhatIf`で変更対象を確認してから
 .\scripts\install-typewhisper-integration.ps1
 ```
 
-設定画面で送信先CodexタスクIDを指定すると、利用者はF13で録音を開始・停止し、校正本文を確認・編集して送信できます。UniToDoはTypeWhisperのループバックAPIで「音声校正」ワークフローを直接開始・停止します。API起動と選択モデルのダウンロード済み状態を確認した後、録音開始API内で認識モデルを遅延ロードし、実際の録音開始を確認してから表示を進めます。F14開始とF15停止は手動操作用の予備経路として残します。Ollamaの起動とモデルロードは録音と並行し、録音停止後は対象モデルのロード完了を確認してから本文をOllamaへ渡します。Codex CLIはGit管理外の常駐アプリ配置先から起動するため、この送信経路だけリポジトリ検査を省略します。サンドボックスと承認設定は維持します。構成、データ保護、CLI送信、テスト、障害対応は[音声入力設計](docs/TaskManager-Vault/07_音声入力.md)を参照してください。
+利用者はF13で録音を開始・停止し、校正本文を確認・編集して送信できます。UniToDoはTypeWhisperのループバックAPIで「音声校正」ワークフローを直接開始・停止します。API起動と選択モデルのダウンロード済み状態を確認した後、録音開始API内で認識モデルを遅延ロードし、実際の録音開始を確認してから表示を進めます。F14開始とF15停止は手動操作用の予備経路として残します。Ollamaの起動とモデルロードは録音と並行し、録音停止後は対象モデルのロード完了を確認してから本文をOllamaへ渡します。音声はWebと共通のCodex App Server経路・会話・権限を使用します。追加の質問への回答や停止はWeb画面で操作します。構成、データ保護、CLI送信、テスト、障害対応は[音声入力設計](docs/TaskManager-Vault/07_音声入力.md)を参照してください。
 
 ## 初回設定
 
 1. デスクトップの`UniToDo`ショートカットを開きます（実行ファイル名は`TaskManager.exe`のままです）。
-2. 「設定」で活動時間、作業時間、優先度係数、通知、Codex音声入力の送信先タスクIDを確認します。
+2. 「設定」で活動時間、作業時間、優先度係数、通知を確認します。音声入力の送信先はWebのCodex会話と共通です。
 3. Google CloudでCalendar APIを有効にし、デスクトップアプリ用OAuthクライアントの`credentials.json`を取得します。
 4. 「設定」からJSONを登録し、「Google Calendarに接続」を押します。要求権限は`calendar.readonly`のみです。
 

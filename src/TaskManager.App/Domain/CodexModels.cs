@@ -37,6 +37,8 @@ public sealed class CodexSubmission
 /// <summary>Codex CLIプロセスの実行結果を表す。</summary>
 public sealed class CodexCommandResult
 {
+    // 未送信が確認でき、本文を再確認へ戻せるかを保持する。
+    public bool CanRetry { get; init; } = true;
     // 終了状態、利用者向けの短いエラー、Codexの一時表示用応答を保持する。
     public bool IsSuccess { get; init; }
     public int ExitCode { get; init; }
