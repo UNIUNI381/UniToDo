@@ -23,10 +23,6 @@ public sealed class CodexChatService
     private readonly string statePath;
     private readonly string workspace;
     private readonly string skillPath;
-    // Google Calendar依頼でだけ投入するプラグインスキルの場所を保持する。
-    private readonly string? calendarSkillPath;
-    // Google Calendar依頼でだけ投入する接続アプリの参照を保持する。
-    private readonly string? calendarAppPath;
     // 通知の同期と利用者の操作の直列化を別々に保持する。
     private readonly object stateLock = new();
     private readonly SemaphoreSlim actions = new(1, 1);
@@ -46,9 +42,7 @@ public sealed class CodexChatService
     public CodexChatService(
         ICodexAppServer server,
         TaskManagerPaths paths,
-        UiChangeNotifier changes,
-        string? calendarSkillPath = null,
-        string? calendarAppPath = null)
+        UiChangeNotifier changes)
     {
         // 会話内容はCodex側へ保存し、アプリには識別子と送信重複防止情報だけを保存する。
         this.server = server;
@@ -56,8 +50,6 @@ public sealed class CodexChatService
         statePath = Path.Combine(paths.DataDirectory, "codex-chat-state.json");
         workspace = Path.Combine(paths.DataDirectory, "assistant-workspace");
         skillPath = Path.Combine(AppContext.BaseDirectory, "assistant-skill", "SKILL.md");
-        this.calendarSkillPath = calendarSkillPath ?? FindGoogleCalendarSkillPath();
-        this.calendarAppPath = calendarAppPath ?? FindGoogleCalendarAppPath(this.calendarSkillPath);
         stored = File.Exists(statePath)
             ? JsonSerializer.Deserialize<ChatStoredState>(File.ReadAllText(statePath)) ?? throw new InvalidOperationException("Codex会話情報を読み込めません。")
             : new(Guid.NewGuid().ToString("N"), null, []);
@@ -99,6 +91,10 @@ public sealed class CodexChatService
             + "PowerShell 5.1で日本語JSONをパイプ入力する場合は $OutputEncoding=[Text.Encoding]::UTF8 を同じコマンド内で先に設定してください。"
             + "ただし対象や依頼内容が曖昧な場合、削除やスキルで指定された業務上の確認は省略しないでください。"
             + "SQLite・APIの直接操作、ソース編集、プログラム開発は行わないでください。"
+            + "接続アプリの参照は利用可能な機能の提示です。利用するかは送信本文と会話履歴から判断し、無関係な連携を呼ばないでください。"
+            + "Google Calendarへの予定登録・更新・削除を明示された場合は接続済みプラグインを使用してください。"
+            + "本体のcalendar.readonlyはローカル同期だけの制約で、接続プラグインには適用しません。"
+            + "連携の可否は現在のツール情報と実行結果で判断し、過去の利用不可という回答を根拠に拒否しないでください。"
             + "実行できない処理は制約を説明してください。他のCodex会話を操作しないでください。"
             + "確認が必要な場合は質問して回答を待ってください。スキル絶対パス: " + skillPath;
         Dictionary<string, object?> configuration = new()
@@ -172,6 +168,12 @@ public sealed class CodexChatService
                 }
                 if (status != "idle") throw new InvalidOperationException("現在の処理を終えてから送信してください。接続不明時は会話を開き直し、履歴を確認してください。");
                 if (stored.Receipts.Length >= 1000) throw new InvalidOperationException("この会話の送信上限です。新しい会話を開始してください。");
+            }
+            // 接続情報の取得失敗は未送信として扱い、受付記録を消費しない。
+            object[] input = await BuildTurnInputAsync(submission.Text);
+            lock (stateLock)
+            {
+                if (!ready || status != "idle") throw new InvalidOperationException("Codexとの接続状態が変わりました。履歴を再取得してください。");
                 stored = stored with { Receipts = [.. stored.Receipts, new(submission.RequestIdentifier, hash)] };
                 Save();
                 status = "running";
@@ -182,7 +184,7 @@ public sealed class CodexChatService
                 JsonElement result = await server.CallAsync("turn/start", new
                 {
                     threadId = stored.Thread, clientUserMessageId = submission.RequestIdentifier,
-                    input = BuildTurnInput(submission.Text),
+                    input,
                     effort = "low", serviceTier = "fast", approvalPolicy = "never", approvalsReviewer = "user",
                     // 復元済み会話にも毎回同じ限定権限を適用し、旧設定へ戻ることを防ぐ。
                     sandboxPolicy = new { type = "workspaceWrite", writableRoots = new[] { workspace, AppContext.BaseDirectory }, networkAccess = false }
@@ -204,98 +206,36 @@ public sealed class CodexChatService
         finally { actions.Release(); }
     }
 
-    private object[] BuildTurnInput(string text)
+    private async Task<object[]> BuildTurnInputAsync(string text)
     {
-        // Calendar依頼だけを明示スキルに結び付け、通常のタスク操作へ余分な指示を送らない。
-        object taskSkill = new { type = "skill", name = "manage-local-tasks", path = skillPath };
-        if (calendarSkillPath is null || !RequiresGoogleCalendarSkill(text))
-            return [new { type = "text", text }, taskSkill];
-        List<object> input = [
-            new { type = "text", text = "$google-calendar " + text },
-            taskSkill,
-            new { type = "skill", name = "google-calendar", path = calendarSkillPath }
-        ];
-        if (calendarAppPath is not null)
-            input.Add(new { type = "mention", name = "Google Calendar", path = calendarAppPath });
+        // キャッシュ配置や本文の単語に依存せず、現在呼出可能な接続アプリを毎回解決する。
+        JsonElement response;
+        try
+        {
+            response = await server.CallAsync("app/installed", new { threadId = stored.Thread, forceRefresh = true });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or TimeoutException)
+        {
+            // 未導入と通信失敗を混同せず、本文を送信する前に再試行可能なエラーとして返す。
+            throw new InvalidOperationException("接続アプリの状態を確認できなかったため、依頼は送信していません。接続を確認して再送してください。", exception);
+        }
+        if (!response.TryGetProperty("apps", out JsonElement applications) || applications.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("接続アプリの応答形式が不正なため、依頼は送信していません。Codex CLIを確認してください。");
+
+        // 本文を改変せず、専用タスクスキルと実行可能なアプリ参照を別入力として渡す。
+        List<object> input = [new { type = "text", text }, new { type = "skill", name = "manage-local-tasks", path = skillPath }];
+        HashSet<string> identifiers = new(StringComparer.Ordinal);
+        foreach (JsonElement application in applications.EnumerateArray())
+        {
+            if (application.ValueKind != JsonValueKind.Object
+                || !application.TryGetProperty("enabled", out JsonElement enabled) || enabled.ValueKind != JsonValueKind.True
+                || !application.TryGetProperty("callable", out JsonElement callable) || callable.ValueKind != JsonValueKind.True) continue;
+            string identifier = Text(application, "id");
+            if (string.IsNullOrWhiteSpace(identifier) || !identifiers.Add(identifier)) continue;
+            string name = Text(application, "runtimeName");
+            input.Add(new { type = "mention", name = string.IsNullOrWhiteSpace(name) ? identifier : name, path = "app://" + identifier });
+        }
         return input.ToArray();
-    }
-
-    private static bool RequiresGoogleCalendarSkill(string text)
-    {
-        // 予定確認・変更に使う自然な表現だけを検出してGoogle Calendarスキルを投入する。
-        string[] keywords = [
-            "google calendar", "googleカレンダー", "グーグルカレンダー", "カレンダー", "予定表",
-            "予定", "会議", "ミーティング", "スケジュール", "空き時間", "空いて"
-        ];
-        return keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string? FindGoogleCalendarSkillPath()
-    {
-        // 有効なCodexプラグインのキャッシュから標準Google Calendarスキルだけを解決する。
-        try
-        {
-            string cacheDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".codex", "plugins", "cache", "openai-curated", "google-calendar");
-            if (!Directory.Exists(cacheDirectory)) return null;
-            return Directory.EnumerateFiles(cacheDirectory, "SKILL.md", SearchOption.AllDirectories)
-                .Where(path => string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "google-calendar", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-        }
-        catch (IOException)
-        {
-            // プラグイン更新中などに読めない場合は通常会話を継続する。
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // プラグインキャッシュへアクセスできない場合は通常会話を継続する。
-            return null;
-        }
-    }
-
-    private static string? FindGoogleCalendarAppPath(string? skillPath)
-    {
-        // スキルと同じプラグイン定義から接続アプリIDを読み、App Serverのmention形式へ変換する。
-        if (skillPath is null) return null;
-        try
-        {
-            DirectoryInfo? skillDirectory = new FileInfo(skillPath).Directory;
-            string? pluginDirectory = skillDirectory?.Parent?.Parent?.FullName;
-            if (pluginDirectory is null) return null;
-            string appDefinitionPath = Path.Combine(pluginDirectory, ".app.json");
-            if (!File.Exists(appDefinitionPath)) return null;
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(appDefinitionPath));
-            JsonElement appIdentifier = document.RootElement
-                .GetProperty("apps")
-                .GetProperty("google-calendar")
-                .GetProperty("id");
-            return appIdentifier.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(appIdentifier.GetString())
-                ? "app://" + appIdentifier.GetString()
-                : null;
-        }
-        catch (IOException)
-        {
-            // プラグイン更新中などに読めない場合はスキルだけで通常会話を継続する。
-            return null;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            // プラグインキャッシュへアクセスできない場合はスキルだけで通常会話を継続する。
-            return null;
-        }
-        catch (JsonException)
-        {
-            // 壊れたプラグイン定義は接続アプリとして投入しない。
-            return null;
-        }
-        catch (KeyNotFoundException)
-        {
-            // 期待するGoogle Calendarアプリ定義がない場合はスキルだけで通常会話を継続する。
-            return null;
-        }
     }
 
     public async Task<ChatSnapshot> NewAsync(string conversation)

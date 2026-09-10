@@ -16,9 +16,8 @@ public static class CodexChatTests
         try
         {
             FakeServer server = new();
-            string calendarSkillPath = Path.Combine(directory, "google-calendar", "SKILL.md");
             string calendarAppPath = "app://connector-calendar-test";
-            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier(), calendarSkillPath, calendarAppPath);
+            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
             ChatSnapshot initial = await service.GetAsync();
             Assert(server.StartConfiguration.GetProperty("sandbox").GetString() == "workspace-write", "Sandbox must remain restricted to workspace");
             Assert(server.StartConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Routine execution must not prompt");
@@ -35,10 +34,9 @@ public static class CodexChatTests
             Assert(server.TurnConfiguration.GetProperty("serviceTier").GetString() == "fast", "Each turn must retain fast service tier");
             Assert(!server.TurnConfiguration.GetProperty("sandboxPolicy").GetProperty("networkAccess").GetBoolean(), "Each turn must retain network restriction");
             JsonElement[] calendarInput = server.TurnConfiguration.GetProperty("input").EnumerateArray().ToArray();
-            Assert(calendarInput[0].GetProperty("text").GetString() == "$google-calendar " + request.Text, "Calendar requests must explicitly invoke the plugin skill");
-            Assert(calendarInput.Any(item => item.GetProperty("type").GetString() == "skill"
-                && item.GetProperty("name").GetString() == "google-calendar"
-                && item.GetProperty("path").GetString() == calendarSkillPath), "Calendar plugin skill path must be passed to App Server");
+            Assert(calendarInput[0].GetProperty("text").GetString() == request.Text, "User text must remain unchanged");
+            Assert(calendarInput.Count(item => item.GetProperty("type").GetString() == "skill") == 1,
+                "Only the bundled task skill is injected; stale plugin cache paths must not be used");
             Assert(calendarInput.Any(item => item.GetProperty("type").GetString() == "mention"
                 && item.GetProperty("name").GetString() == "Google Calendar"
                 && item.GetProperty("path").GetString() == calendarAppPath), "Calendar connection must be passed to App Server");
@@ -110,6 +108,7 @@ public static class CodexChatTests
             server.FailSend = true;
             completedVoice = await voice.SendAsync(new() { ThreadIdentifier = service.Snapshot().Conversation, ReviewIdentifier = Guid.NewGuid().ToString("N"), Text = "結果不明の音声" }, CancellationToken.None);
             Assert(!completedVoice.IsSuccess && !completedVoice.CanRetry, "Uncertain voice submissions must not be requeued");
+            await VerifyApplicationsAsync();
         }
         finally
         {
@@ -118,7 +117,43 @@ public static class CodexChatTests
         }
     }
 
-    public static async Task<int> LiveAsync(bool verifyTaskCommand = false)
+    private static async Task VerifyApplicationsAsync()
+    {
+        // 再開会話、単語のない追送、無効化、接続失敗を実通信なしで検証する。
+        FakeServer server = new();
+        CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+        ChatSnapshot initial = await service.GetAsync();
+        foreach (string text in new[] { "それを登録して", "今やるタスクを教えて", "Move it to Friday" })
+        {
+            await service.SendAsync(new(initial.Conversation, Guid.NewGuid().ToString(), text));
+            Assert(server.TurnConfiguration.GetProperty("input").EnumerateArray().Count(item => item.GetProperty("type").GetString() == "mention") == 2,
+                "App availability must not depend on keywords; disabled, uncallable and duplicate apps must be excluded");
+            Assert(server.AppConfiguration.GetProperty("threadId").GetString() == "test-thread"
+                && server.AppConfiguration.GetProperty("forceRefresh").GetBoolean(), "Runtime must be refreshed against the resumed thread");
+            await service.InterruptAsync(initial.Conversation);
+        }
+        server.Applications = JsonSerializer.SerializeToElement(new { apps = Array.Empty<object>() });
+        await service.SendAsync(new(initial.Conversation, Guid.NewGuid().ToString(), "続けて"));
+        Assert(server.TurnConfiguration.GetProperty("input").GetArrayLength() == 2, "Removed apps must not remain in subsequent inputs");
+        await service.InterruptAsync(initial.Conversation);
+
+        // 未送信の障害では受付を残さず、同じ送信識別子で安全に再送できる。
+        ChatSubmission retry = new(initial.Conversation, Guid.NewGuid().ToString(), "再送の検証");
+        server.FailApplications = true;
+        int previousSendCount = server.SendCount;
+        await RejectAsync(() => service.SendAsync(retry));
+        Assert(server.SendCount == previousSendCount && !service.HasReceipt(retry.Conversation, retry.RequestIdentifier)
+            && service.Snapshot().Status == "idle", "Discovery failure must not submit or consume a receipt");
+        server.FailApplications = false;
+        server.Applications = JsonSerializer.SerializeToElement(new { unexpected = true });
+        await RejectAsync(() => service.SendAsync(retry));
+        Assert(!service.HasReceipt(retry.Conversation, retry.RequestIdentifier), "Malformed discovery must not consume a receipt");
+        server.Applications = JsonSerializer.SerializeToElement(new { apps = Array.Empty<object>() });
+        await service.SendAsync(retry);
+        Assert(server.SendCount == previousSendCount + 1, "Retry after discovery recovery must run exactly once");
+    }
+
+    public static async Task<int> LiveAsync(bool verifyTaskCommand = false, bool verifyCalendar = false)
     {
         // 実環境のログインとプロトコルだけを検証し、タスクの読取や変更は行わない。
         string? previousDirectory = Environment.GetEnvironmentVariable("TASKMANAGER_DATA_DIR");
@@ -129,12 +164,20 @@ public static class CodexChatTests
             await using CodexAppServer server = new();
             // 実CLI試験では成功したコマンド出力を確認し、モデルの自己申告だけに依存しない。
             bool commandSucceeded = false;
+            // 個人データを含まない色定義の取得成功だけを検証する。
+            bool calendarSucceeded = false;
             server.MessageReceived += envelope =>
             {
                 // 実タスク本文は出力せず、ラッパー経由の読取成功マーカーだけを検査する。
                 if (envelope.TryGetProperty("method", out JsonElement method) && method.GetString() == "item/completed")
                 {
                     JsonElement item = envelope.GetProperty("params").GetProperty("item");
+                    if (item.GetProperty("type").GetString() == "mcpToolCall"
+                        && item.GetProperty("server").GetString() == "codex_apps"
+                        && item.GetProperty("tool").GetString() is "google_calendar.get_colors" or "google_calendar_get_colors"
+                        && item.GetProperty("status").GetString() == "completed"
+                        && (!item.TryGetProperty("error", out JsonElement calendarError) || calendarError.ValueKind == JsonValueKind.Null))
+                        calendarSucceeded = true;
                     // 読取試験の失敗時だけシェル診断を示し、成功時の実データは表示しない。
                     if (item.GetProperty("type").GetString() == "commandExecution"
                         && item.TryGetProperty("exitCode", out JsonElement failureCode)
@@ -149,7 +192,9 @@ public static class CodexChatTests
             };
             CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
             ChatSnapshot initial = await service.GetAsync();
-            string prompt = verifyTaskCommand
+            string prompt = verifyCalendar
+                ? "接続確認です。Google Calendarプラグインのget_colorsを1回実行してください。予定や個人情報の取得、予定登録・変更・削除はしないでください。成功したら「接続確認できました」と回答してください。"
+                : verifyTaskCommand
                 ? "通常のタスク操作権限を確認します。taskctl list --fields identifier を1回だけ直接実行してください。ラッパーや絶対パス、追加のpowershell起動は使わないでください。出力はPowerShellの変数に格納し、終了コード0かつJSON解析成功のときだけTASKCTL_OKを出力してください。タスク名・内容やJSON原文は出力しないでください。データは変更しないでください。成功した場合は「接続確認できました」とだけ回答してください。"
                 : "接続の動作確認です。ツールやスキルの読込み、外部データの参照・変更は一切せず、「接続確認できました」とだけ回答してください。";
             await service.SendAsync(new(initial.Conversation, Guid.NewGuid().ToString(), prompt));
@@ -162,6 +207,7 @@ public static class CodexChatTests
                 {
                     Assert(state.Error is null && state.Messages.Any(message => message.Role == "assistant" && message.Text.Contains("接続確認")), "Live Codex response missing: " + state.Error);
                     Assert(!verifyTaskCommand || commandSucceeded, "Routine task CLI must succeed without approval");
+                    Assert(!verifyCalendar || calendarSucceeded, "Calendar read-only tool must complete through App Server");
                     Console.WriteLine("PASS live App Server: initialization, turn streaming, completion");
                     await service.ReconnectAsync(initial.Conversation);
                     Assert(service.Snapshot().Messages.Any(message => message.Role == "assistant"), "Live history missing");
@@ -197,6 +243,16 @@ public static class CodexChatTests
         // 要求回数、返信、設定と障害注入状態を保持する。
         public int SendCount { get; private set; }
         public bool FailSend { get; set; }
+        // 接続アプリの現在状態、要求設定と取得失敗を保持する。
+        public bool FailApplications { get; set; }
+        public JsonElement AppConfiguration { get; private set; }
+        public JsonElement Applications { get; set; } = JsonSerializer.SerializeToElement(new { apps = new[] {
+            new { id = "connector-calendar-test", runtimeName = "Google Calendar", enabled = true, callable = true },
+            new { id = "connector-calendar-test", runtimeName = "Duplicate", enabled = true, callable = true },
+            new { id = "connector-other-test", runtimeName = "Other", enabled = true, callable = true },
+            new { id = "disabled", runtimeName = "Disabled", enabled = false, callable = true },
+            new { id = "uncallable", runtimeName = "Uncallable", enabled = true, callable = false }
+        } });
         public List<JsonElement> Replies { get; } = [];
         public JsonElement StartConfiguration { get; private set; }
         // 各送信で適用された権限設定を保持する。
@@ -207,6 +263,12 @@ public static class CodexChatTests
         public Task<JsonElement> CallAsync(string method, object parameters)
         {
             // 実通信せず、順序の異なる通知と応答を再現する。
+            if (method == "app/installed")
+            {
+                AppConfiguration = JsonSerializer.SerializeToElement(parameters);
+                if (FailApplications) throw new InvalidOperationException("Simulated discovery failure");
+                return Task.FromResult(Applications);
+            }
             if (method is "thread/start" or "thread/resume" or "thread/read")
             {
                 StartConfiguration = JsonSerializer.SerializeToElement(parameters);

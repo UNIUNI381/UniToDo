@@ -29,6 +29,7 @@ public static class Program
     {
         // 中核ロジック、保存層、自動処理、性能をまとめて検証する。
         if (arguments.Contains("--codex-smoke")) return await CodexChatTests.LiveAsync();
+        if (arguments.Contains("--codex-calendar-smoke")) return await CodexChatTests.LiveAsync(verifyCalendar: true);
         if (arguments.Contains("--codex-task-smoke")) return await CodexChatTests.LiveAsync(verifyTaskCommand: true);
         await RunTestAsync("Codex会話の重複送信・承認・復旧を管理する", CodexChatTests.VerifyAsync);
         await RunTestAsync("CLIの標準入力・選択JSON・単一取得を検証する", CliJsonTests.VerifyAsync);
