@@ -110,6 +110,7 @@ public static class CodexChatTests
             Assert(!completedVoice.IsSuccess && !completedVoice.CanRetry, "Uncertain voice submissions must not be requeued");
             await VerifyApplicationsAsync();
             await VerifyArchivedAsync();
+            await VerifyMcpFormsAsync();
         }
         finally
         {
@@ -203,6 +204,61 @@ public static class CodexChatTests
         await RejectAsync(failedService.GetAsync);
         Assert(failedService.Snapshot().Status != "archived" && !failedServer.Methods.Contains("thread/start"),
             "Unrelated resume failures must not be treated as archive evidence");
+    }
+
+    private static async Task VerifyMcpFormsAsync()
+    {
+        // 外部MCPの確認を保存した要求へ一度だけ返し、自動承認や回答の取違えを防ぐ。
+        FakeServer server = new();
+        CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+        ChatSnapshot initial = await service.GetAsync();
+        JsonElement empty = JsonSerializer.SerializeToElement(new { type = "object", properties = new { } });
+        void Request(JsonElement schema, string mode = "form")
+        {
+            // 予定を作成せず、App Serverからの確認要求を再現する。
+            server.Emit(new { id = Guid.NewGuid().ToString(), method = "mcpServer/elicitation/request", @params = new
+            {
+                threadId = "test-thread", serverName = "codex_apps", mode,
+                message = "Allow Google Calendar to create an event?", requestedSchema = schema
+            } });
+        }
+        Request(empty);
+        ChatPrompt confirmation = service.Snapshot().Prompts.Single();
+        Assert(confirmation.Kind == "mcp-form" && confirmation.Description.Contains("Allow Google Calendar"), "Standard confirmation must offer explicit approval");
+        Assert(server.Replies.Count == 0, "Receiving a prompt must never approve automatically");
+        await service.AnswerAsync(new(confirmation.Identifier, "accept", null));
+        Assert(server.Replies[0].GetProperty("action").GetString() == "accept"
+            && !server.Replies[0].GetProperty("content").EnumerateObject().Any(), "Empty confirmation must return accept with an empty object");
+        await RejectAsync(() => service.AnswerAsync(new(confirmation.Identifier, "accept", null)));
+
+        JsonElement fields = JsonSerializer.SerializeToElement(new { type = "object", properties = new
+        {
+            approved = new { type = "boolean", title = "確認", @default = true },
+            choice = new { type = "string", @enum = new[] { "one", "two" } }
+        }, required = new[] { "approved", "choice" } });
+        Request(fields);
+        confirmation = service.Snapshot().Prompts.Single();
+        await RejectAsync(() => service.AnswerAsync(new(confirmation.Identifier, "accept", null)));
+        await RejectAsync(() => service.AnswerAsync(new(confirmation.Identifier, "accept", new() { ["approved"] = ["yes"], ["choice"] = ["one"] })));
+        await RejectAsync(() => service.AnswerAsync(new(confirmation.Identifier, "accept", new() { ["approved"] = ["true"], ["choice"] = ["unknown"] })));
+        Assert(service.Snapshot().Prompts.Length == 1 && server.Replies.Count == 1, "Invalid answers must retain the pending confirmation");
+        await service.AnswerAsync(new(confirmation.Identifier, "accept", new() { ["approved"] = ["true"], ["choice"] = ["two"] }));
+        Assert(server.Replies[1].GetProperty("content").GetProperty("approved").GetBoolean(), "Boolean answers must be sent as booleans");
+        foreach (string mode in new[] { "url", "openai/form" })
+        {
+            Request(empty, mode);
+            confirmation = service.Snapshot().Prompts.Single();
+            Assert(confirmation.Kind == "unsupported", "URL and extended forms must not become ordinary approvals");
+            await RejectAsync(() => service.AnswerAsync(new(confirmation.Identifier, "accept", null)));
+            await service.AnswerAsync(new(confirmation.Identifier, "decline", null));
+            Assert(server.Replies.Last().GetProperty("content").ValueKind == JsonValueKind.Null, "Decline must not include form content");
+        }
+        JsonElement constrained = JsonSerializer.SerializeToElement(new { mode = "form", requestedSchema = new { type = "object", properties = new { value = new { type = "string", pattern = "secret" } } } });
+        Assert(!CodexMcpForm.IsSupported(constrained), "Unsupported validation constraints must fail closed");
+        Request(empty);
+        confirmation = service.Snapshot().Prompts.Single();
+        server.CutConnection();
+        await RejectAsync(() => service.AnswerAsync(new(confirmation.Identifier, "accept", null)));
     }
 
     public static async Task<int> LiveAsync(bool verifyTaskCommand = false, bool verifyCalendar = false)

@@ -385,9 +385,9 @@ public sealed class CodexChatService
             }
             return new { answers };
         }
-        // 外部MCPの複雑な入力やログインはPCで行い、この画面から暗黙承認しない。
-        if (method == "mcpServer/elicitation/request" && answer.Action != "accept")
-            return new { action = answer.Action, content = (object?)null };
+        // 標準MCPフォームは保存済みの要求に対する明示回答だけを返し、永続許可を作らない。
+        if (method == "mcpServer/elicitation/request")
+            return new { action = answer.Action, content = answer.Action == "accept" ? CodexMcpForm.BuildContent(parameters, answer.Answers) : null };
         throw new ArgumentException("この種類の確認はこの画面では承認できません。拒否または停止してください。");
     }
 
@@ -407,6 +407,7 @@ public sealed class CodexChatService
             {
                 string promptIdentifier = Guid.NewGuid().ToString("N");
                 string kind = method == "item/tool/requestUserInput" ? "question"
+                    : method == "mcpServer/elicitation/request" && CodexMcpForm.IsSupported(parameters) ? "mcp-form"
                     : method is "item/commandExecution/requestApproval" or "item/fileChange/requestApproval" or "item/permissions/requestApproval" ? "approval" : "unsupported";
                 string description = Text(parameters, "reason");
                 if (parameters.TryGetProperty("command", out JsonElement command)) description += "\n" + command.ToString();
@@ -415,7 +416,9 @@ public sealed class CodexChatService
                 if (activity is not null) description += "\n" + activity;
                 if (parameters.TryGetProperty("networkApprovalContext", out JsonElement network)) description += "\n" + network.ToString();
                 if (kind == "unsupported") description = "この確認はこの画面では対応していません。PCでの操作が必要な場合があります。\n" + Text(parameters, "message");
-                JsonElement? questions = parameters.TryGetProperty("questions", out JsonElement requestedQuestions) ? requestedQuestions.Clone() : null;
+                if (kind == "mcp-form") description = Text(parameters, "message");
+                JsonElement? questions = kind == "mcp-form" ? parameters.GetProperty("requestedSchema").Clone()
+                    : parameters.TryGetProperty("questions", out JsonElement requestedQuestions) ? requestedQuestions.Clone() : null;
                 ChatPrompt prompt = new(promptIdentifier, kind, Limit(description), questions);
                 prompts[promptIdentifier] = (identifier.Clone(), method, parameters.Clone(), prompt);
                 ResponseAvailable?.Invoke(Snapshot());

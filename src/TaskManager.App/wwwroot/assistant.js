@@ -100,7 +100,7 @@
     form.append(element("strong", prompt.kind === "question" ? "確認したいこと" : "実行の確認"));
     if (prompt.description) form.append(element("pre", prompt.description));
     const answers = new Map();
-    for (const question of prompt.questions || []) {
+    for (const question of prompt.kind === "mcp-form" ? [] : prompt.questions || []) {
       const label = element("label", question.question);
       const input = document.createElement("input");
       input.type = question.isSecret ? "password" : "text";
@@ -121,6 +121,35 @@
         form.append(button);
       }
     }
+    if (prompt.kind === "mcp-form") {
+      // サーバーで対応可能と確認されたMCPフォームを表示し、既定値による自動承認をしない。
+      for (const [name, definition] of Object.entries(prompt.questions.properties)) {
+        const label = element("label", definition.title || name);
+        const choices = definition.type === "boolean" ? ["true", "false"] : definition.enum;
+        const input = document.createElement(choices ? "select" : "input");
+        if (choices) {
+          const placeholder = element("option", "選択してください");
+          placeholder.value = "";
+          placeholder.disabled = true;
+          placeholder.selected = true;
+          input.append(placeholder);
+          for (const value of choices) {
+            const option = element("option", definition.type === "boolean" ? value === "true" ? "はい" : "いいえ" : value);
+            option.value = value;
+            input.append(option);
+          }
+        } else {
+          input.type = "text";
+          input.maxLength = 4000;
+          input.autocomplete = "off";
+        }
+        input.required = (prompt.questions.required || []).includes(name);
+        label.append(input);
+        if (definition.description) label.append(element("small", definition.description));
+        form.append(label);
+        answers.set(name, input);
+      }
+    }
     if (prompt.kind !== "unsupported") {
       const accept = element("button", prompt.kind === "question" ? "回答する" : "今回のみ許可", "primary-button");
       accept.type = "submit";
@@ -138,7 +167,9 @@
     form.addEventListener("submit", (event) => {
       // 質問の識別子と入力値だけを送り、RPC本文はブラウザから指定しない。
       event.preventDefault();
-      operate("/answers", { identifier: prompt.identifier, action: "accept", answers: Object.fromEntries([...answers].map(([identifier, input]) => [identifier, [input.value]])) });
+      operate("/answers", { identifier: prompt.identifier, action: "accept", answers: Object.fromEntries([...answers]
+        .filter(([, input]) => prompt.kind !== "mcp-form" || input.value !== "" || input.required)
+        .map(([identifier, input]) => [identifier, [input.value]])) });
     });
     promptList.append(form);
   }

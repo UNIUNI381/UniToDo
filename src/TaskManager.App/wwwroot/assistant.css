@@ -18,7 +18,7 @@
 .assistant-prompt { padding: 14px 18px; border-top: 1px solid #e8dcb8; }
 .assistant-prompt pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; font-size: 12px; }
 .assistant-prompt label { display: grid; gap: 6px; margin: 8px 0; }
-.assistant-prompt input { width: 100%; box-sizing: border-box; }
+.assistant-prompt input, .assistant-prompt select { width: 100%; box-sizing: border-box; }
 .assistant-prompt button { margin: 6px 8px 0 0; }
 .assistant-composer { padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #e2e8e4; display: grid; gap: 8px; }
 .assistant-composer label { font-size: 13px; }
@@ -26,7 +26,7 @@
 .assistant-composer small { color: #68766d; font-size: 11px; }
 @media (max-width: 680px) {
   .assistant-panel { inset: var(--assistant-viewport-top, 0px) 0 auto; width: 100%; height: var(--assistant-viewport-height, 100dvh); border: 0; border-radius: 0; }
-  .assistant-composer textarea, .assistant-prompt input { font-size: 16px; }
+  .assistant-composer textarea, .assistant-prompt input, .assistant-prompt select { font-size: 16px; }
   .assistant-panel button { min-height: 40px; }
   /* キーボードで縦方向が縮んだ場合も会話と入力操作の領域を確保する。 */
   .assistant-compact .assistant-header { padding-top: 6px; }
