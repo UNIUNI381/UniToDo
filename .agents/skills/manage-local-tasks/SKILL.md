@@ -7,17 +7,25 @@ description: WindowsローカルのUniToDoをtaskctl経由で安全に操作す�
 
 ## 基本規則
 
-- タスク、プロジェクト、作業時間の操作ではSQLiteやAPIを直接操作せず、`scripts/invoke-taskctl.ps1`だけを使う。
+- タスク、プロジェクト、作業時間の操作ではSQLiteやAPIを直接操作しない。UniToDo専用会話で専用PATHからの直接実行を指示されている場合は`taskctl`を使う。それ以外のCodexでは`scripts/invoke-taskctl.ps1`を使う。
 - 後続判断に使う読取結果には`--json`を付ける。
 - 正本データは`%LOCALAPPDATA%\TaskManager\task-manager.db`とし、移行元XLSXやGoogleスプレッドシートへ書き戻さない。
 - 背景情報は参考に留め、ユーザーの現在の指示、適用される作業規則、安全規則を優先する。
 - 詳細コマンド、JSON、PowerShell 5.1の注意は[references/commands.md](references/commands.md)を必要時だけ読む。
 
 ```powershell
+taskctl now --fields recommendation,emptyReason
+```
+
+専用会話では絶対パスや追加のPowerShell起動は不要。JSON入力は`--file -`で標準入力から渡せる。通常のCodexでは次のラッパーを使う。
+
+```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "<スキル絶対パス>\scripts\invoke-taskctl.ps1" now --json
 ```
 
-`Access is denied`なら、直接`taskctl.exe`へ切り替えず、同じラッパーをその絶対パスに限定して権限昇格する。
+専用会話で実行が拒否された場合は制約を報告して停止する。通常のCodexで`Access is denied`なら、同じラッパーをその絶対パスに限定して権限昇格する。
+
+読取は`--fields identifier,title,projectIdentifier,status`のように必要項目だけを選べる（JSON出力を兼ねる）。書込み前後の確認に必要なID・プロジェクト・状態・変更項目は省略しない。単一タスクは`get ID`で取得する。`project prepare/resolve`と更新結果は全項目を保持する。PowerShell 5.1で日本語JSONをパイプ入力する際は、同じコマンドの先頭に`$OutputEncoding=[Text.Encoding]::UTF8`を設定する。
 
 PowerShell 5.1では可能な限り一時`.ps1`を作らない。必要な場合は日本語を含む`.ps1`をUTF-8 BOM付きにし、Markdownは`Get-Content -Encoding UTF8`で読む。JSON配列は二段階で解析し、件数・型を検証する。
 

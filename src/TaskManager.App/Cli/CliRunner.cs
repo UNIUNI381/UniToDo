@@ -10,14 +10,21 @@ namespace TaskManager.Cli;
 public sealed class CliRunner
 {
     // JSON入出力とローカルAPI接続設定を保持する。
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        // CLIのJSONはHTMLへ埋め込まないため、日本語のUnicodeエスケープを省いて出力量を減らす。
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
     private readonly HttpClient httpClient;
+    // 標準入力JSONを読み取るUTF-8リーダーを保持する。
+    private readonly TextReader standardInput;
 
     /// <summary>ローカルAPIへ接続するHTTPクライアントを初期化する。</summary>
-    public CliRunner(HttpClient? localHttpClient = null)
+    public CliRunner(HttpClient? localHttpClient = null, TextReader? inputReader = null)
     {
         // 通常実行は固定ローカルURLを使い、テスト時だけ応答ハンドラーの差替えを許可する。
         httpClient = localHttpClient ?? new HttpClient();
+        standardInput = inputReader ?? Console.In;
         httpClient.BaseAddress ??= new Uri(TaskConstants.LocalAddress);
         httpClient.Timeout = TimeSpan.FromSeconds(30);
     }
@@ -39,13 +46,19 @@ public sealed class CliRunner
         }
         try
         {
-            await EnsureServerAsync(cancellationToken);
             string commandName = arguments[0].ToLowerInvariant();
             bool jsonOutput = arguments.Contains("--json", StringComparer.OrdinalIgnoreCase);
+            ValidateFileOption(arguments);
+            // 出力指定の誤りは更新APIを呼ぶ前に拒否する。
+            string[]? fields = CliJsonOutput.ParseFields(arguments);
+            if (fields is not null && !IsReadCommand(arguments))
+                throw new InvalidOperationException("--fieldsは読取コマンドだけで使用できます。更新応答は省略しません。");
+            await EnsureServerAsync(cancellationToken);
             object? response = commandName switch
             {
                 "now" => await GetAsync("/api/v1/dashboard", cancellationToken),
                 "list" => await ListAsync(arguments, cancellationToken),
+                "get" => await GetAsync($"/api/v1/tasks/{Uri.EscapeDataString(RequirePosition(arguments, 1, "取得するタスクIDを指定してください。"))}", cancellationToken),
                 "add" => await AddAsync(arguments, cancellationToken),
                 "update" => await UpdateAsync(arguments, cancellationToken),
                 "delete" => await DeleteAsync(arguments, cancellationToken),
@@ -58,7 +71,7 @@ public sealed class CliRunner
                 "calendar-sync" => await PostAsync("/api/v1/calendar/synchronize", new { }, cancellationToken),
                 _ => throw new InvalidOperationException($"不明なコマンドです: {commandName}")
             };
-            WriteResponse(response, jsonOutput, commandName);
+            WriteResponse(fields is null ? response : CliJsonOutput.SelectFields(response, fields), jsonOutput || fields is not null, commandName);
             WriteWarning(response, commandName);
             return IsProjectClarificationRequired(commandName, response) ? 2 : 0;
         }
@@ -102,8 +115,7 @@ public sealed class CliRunner
         ManagedTask task;
         if (!string.IsNullOrWhiteSpace(jsonPath))
         {
-            task = JsonSerializer.Deserialize<ManagedTask>(await File.ReadAllTextAsync(jsonPath, cancellationToken), JsonOptions)
-                ?? throw new InvalidOperationException("タスクJSONを解析できません。");
+            task = await ReadJsonFileAsync<ManagedTask>(arguments, cancellationToken);
         }
         else
         {
@@ -224,17 +236,21 @@ public sealed class CliRunner
         throw new InvalidOperationException($"不明なprojectサブコマンドです: {subcommandName}");
     }
 
-    /// <summary>JSONファイルを指定型として読み込む。</summary>
-    private static async Task<TValue> ReadJsonFileAsync<TValue>(
+    /// <summary>JSONファイルまたは標準入力を指定型として読み込む。</summary>
+    private async Task<TValue> ReadJsonFileAsync<TValue>(
         string[] arguments,
         CancellationToken cancellationToken)
     {
-        // --fileを必須として解析失敗を明確なエラーへ変換する。
+        // 単一のJSONオブジェクトだけを受け付け、空入力や配列を更新APIへ渡さない。
         string jsonPath = GetOption(arguments, "--file")
             ?? throw new InvalidOperationException("--fileを指定してください。");
-        return JsonSerializer.Deserialize<TValue>(
-            await File.ReadAllTextAsync(jsonPath, cancellationToken),
-            JsonOptions)
+        string jsonText = jsonPath == "-" ? await standardInput.ReadToEndAsync(cancellationToken) : await File.ReadAllTextAsync(jsonPath, cancellationToken);
+        // PowerShellのUTF-8パイプが付ける先頭BOMだけを取り除き、本文は変更しない。
+        if (jsonText.StartsWith('\uFEFF')) jsonText = jsonText[1..];
+        using JsonDocument document = JsonDocument.Parse(jsonText);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+            throw new InvalidOperationException("入力JSONは単一のオブジェクトにしてください。");
+        return document.RootElement.Deserialize<TValue>(JsonOptions)
             ?? throw new InvalidOperationException("指定JSONを解析できません。");
     }
 
@@ -290,8 +306,7 @@ public sealed class CliRunner
             throw new InvalidOperationException("更新対象のタスクIDを指定してください。");
         }
         string identifier = arguments[1];
-        string jsonPath = GetOption(arguments, "--file") ?? throw new InvalidOperationException("--fileを指定してください。");
-        JsonElement task = JsonSerializer.Deserialize<JsonElement>(await File.ReadAllTextAsync(jsonPath, cancellationToken), JsonOptions);
+        JsonElement task = await ReadJsonFileAsync<JsonElement>(arguments, cancellationToken);
         return await PutAsync($"/api/v1/tasks/{Uri.EscapeDataString(identifier)}", task, cancellationToken);
     }
 
@@ -337,9 +352,7 @@ public sealed class CliRunner
     private async Task<object?> CreateDraftAsync(string[] arguments, CancellationToken cancellationToken)
     {
         // 下書きはCLIから承認せず、任意の冪等キーを付けて画面確認へ回す。
-        string jsonPath = GetOption(arguments, "--file") ?? throw new InvalidOperationException("--fileを指定してください。");
-        DraftBatchRequest request = JsonSerializer.Deserialize<DraftBatchRequest>(await File.ReadAllTextAsync(jsonPath, cancellationToken), JsonOptions)
-            ?? throw new InvalidOperationException("下書きJSONを解析できません。");
+        DraftBatchRequest request = await ReadJsonFileAsync<DraftBatchRequest>(arguments, cancellationToken);
         request.IdempotencyKey = GetOption(arguments, "--idempotency-key") ?? request.IdempotencyKey;
         return await PostAsync("/api/v1/draft-batches", request, cancellationToken);
     }
@@ -903,6 +916,31 @@ public sealed class CliRunner
         return arguments.Contains(optionName, StringComparer.OrdinalIgnoreCase);
     }
 
+    private static bool IsReadCommand(IReadOnlyList<string> arguments)
+    {
+        // 省略表示によって保存後警告やプロジェクト解決の確認情報を隠さない。
+        string command = arguments[0].ToLowerInvariant();
+        string subcommand = arguments.Count > 1 ? arguments[1].ToLowerInvariant() : "";
+        return command is "now" or "list" or "get"
+            || command == "project" && subcommand == "list"
+            || command == "draft" && subcommand is "list" or "get"
+            || command == "time" && subcommand is "active" or "list" or "report";
+    }
+
+    private static void ValidateFileOption(IReadOnlyList<string> arguments)
+    {
+        // 入力元が曖昧な指定や値の欠落を、登録オプションへのフォールバック前に拒否する。
+        bool found = false;
+        for (int position = 0; position < arguments.Count; position++)
+        {
+            if (!string.Equals(arguments[position], "--file", StringComparison.OrdinalIgnoreCase)) continue;
+            if (found || position + 1 >= arguments.Count || string.IsNullOrWhiteSpace(arguments[position + 1])
+                || arguments[position + 1].StartsWith("--", StringComparison.Ordinal))
+                throw new InvalidOperationException("--fileはJSONファイルのパスまたは - を1回だけ指定してください。");
+            found = true;
+        }
+    }
+
     /// <summary>指定位置の必須引数を取得する。</summary>
     private static string RequirePosition(
         IReadOnlyList<string> arguments,
@@ -975,7 +1013,8 @@ public sealed class CliRunner
             PrintProjectPrepareHelp();
             return true;
         }
-        return false;
+        PrintHelp();
+        return true;
     }
 
     /// <summary>draft-createの入力、応答、終了コードを表示する。</summary>
@@ -1079,6 +1118,7 @@ public sealed class CliRunner
         Console.WriteLine("""
             taskctl now [--json]
             taskctl list [--status 状態] [--search 文字列] [--project IDまたは表記] [--json]
+            taskctl get TASK-ID [--json]
             taskctl add --title 名称 [--project IDまたは表記] [--minutes 30] [--deadline 日時] [--importance 3]
             taskctl add --file task.json [--project IDまたは表記] [--no-deadline]
             taskctl update TASK-ID --file task.json
@@ -1102,6 +1142,12 @@ public sealed class CliRunner
             taskctl time update TIME-ID --file time-entry.json [--allow-overlap] [--json]
             taskctl time report --period day|week|month [--anchor YYYY-MM-DD] [--json]
             taskctl calendar-sync
+
+            JSON入力: --file - は標準入力のJSONを読む。--file パスも引き続き使用可能。
+            JSON出力: --json は改行・字下げなし。読取では --fields identifier,title で必要項目だけ取得。
+              --fields はJSON出力を兼ね、ネストは recommendation.task.title のように指定。
+              配列は全要素に適用。nullと空配列を保持。存在しない項目はエラー。
+              project resolve/prepareと更新コマンドは確認情報保護のため項目選択不可。
             """);
     }
 }

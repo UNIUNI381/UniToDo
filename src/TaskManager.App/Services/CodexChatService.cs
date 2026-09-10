@@ -82,12 +82,13 @@ public sealed class CodexChatService
         Directory.CreateDirectory(workspace);
         if (!File.Exists(skillPath)) throw new InvalidOperationException("タスク操作スキルが見つかりません。UniToDoを再インストールしてください。");
         string instructions = "あなたはUniToDoのタスク管理アシスタントです。日本語で短く回答してください。"
-            + "タスク操作には必ず $manage-local-tasks を読み、その scripts/invoke-taskctl.ps1 のみを使ってください。"
-            + "通常のタスク操作に必要なスキル読取りとラッパー実行は承認済みです。スクリプトを実行してよいかの確認は不要です。"
-            + "PowerShellスクリプトは powershell -NoProfile -ExecutionPolicy Bypass -File に絶対パスを渡して実行してください。"
+            + "これはUniToDo専用会話です。タスク操作には $manage-local-tasks の業務規則を守り、専用PATHの taskctl を直接実行してください。"
+            + "taskctl now --json のように呼び、絶対パス、invoke-taskctl.ps1、追加のpowershell起動は不要です。"
+            + "通常のスキル読取りとCLI実行は承認済みです。JSON入力は --file -、読取は --fields を必要時に使い、一時ファイルを減らしてください。"
+            + "PowerShell 5.1で日本語JSONをパイプ入力する場合は $OutputEncoding=[Text.Encoding]::UTF8 を同じコマンド内で先に設定してください。"
             + "ただし対象や依頼内容が曖昧な場合、削除やスキルで指定された業務上の確認は省略しないでください。"
             + "SQLite・APIの直接操作、ソース編集、プログラム開発は行わないでください。"
-            + "実行できない処理は制約を説明してください。既存の音声用会話や他のCodex会話を操作しないでください。"
+            + "実行できない処理は制約を説明してください。他のCodex会話を操作しないでください。"
             + "確認が必要な場合は質問して回答を待ってください。スキル絶対パス: " + skillPath;
         Dictionary<string, object?> configuration = new()
         {
@@ -96,6 +97,12 @@ public sealed class CodexChatService
             ["config"] = new Dictionary<string, object>
             {
                 ["model_reasoning_effort"] = "low",
+                // 専用会話の子シェルだけで同梱CLIを優先し、利用者全体のPATHは変更しない。
+                ["shell_environment_policy.set"] = new Dictionary<string, string>
+                {
+                    ["PATH"] = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar)
+                        + Path.PathSeparator + Environment.GetEnvironmentVariable("PATH")
+                },
                 // CLI配置先だけを追加し、正本DBや開発リポジトリへの書込み権限は付けない。
                 ["sandbox_workspace_write.writable_roots"] = new[] { AppContext.BaseDirectory },
                 ["sandbox_workspace_write.network_access"] = false

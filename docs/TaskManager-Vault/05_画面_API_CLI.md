@@ -61,6 +61,11 @@ F13音声入力はWebタブではなく、トレイ常駐プロセスの状態�
 
 開発ツリーでは`./scripts/task.ps1`がインストール済みCLIの代替です。後続処理へ渡す場合は`--json`を使います。
 
+`get TASK-ID`は単一タスクを取得します。すべての`--file`はパスの代わりに`-`を指定すると標準入力のJSONオブジェクトを読みます。空・不正JSON、null・配列は送信前に拒否します。タスク更新の省略・nullの意味はファイル入力と同じです。CLIの標準入出力はUTF-8で、入力先頭のBOMも受け入れます。PowerShell 5.1の日本語パイプ入力では呼出し側の`$OutputEncoding=[Text.Encoding]::UTF8`も必要です。
+
+`--json`は字下げなし・日本語非エスケープのJSONです。`--fields identifier,title`はJSON出力を兼ねて指定項目だけを返し、配列の件数とnull・空配列を維持します。ネストは`recommendation.task.title`のように指定します。未知の項目はエラーですが、null・空配列内部は検証できません。対象は`now/list/get`、`project list`、`draft list/get`、`time active/list/report`です。更新コマンドと`project prepare/resolve`では保存後警告・解決情報の欠落を防ぐため使用できません。項目選択はCLI内の表示処理であり、API・DBの返却仕様は変更しません。
+
+
 ## AI操作上の境界
 
 - プロジェクト付き操作前に`project prepare`を行い、解決済みIDを明示する。

@@ -31,6 +31,7 @@ public static class Program
         if (arguments.Contains("--codex-smoke")) return await CodexChatTests.LiveAsync();
         if (arguments.Contains("--codex-task-smoke")) return await CodexChatTests.LiveAsync(verifyTaskCommand: true);
         await RunTestAsync("Codex会話の重複送信・承認・復旧を管理する", CodexChatTests.VerifyAsync);
+        await RunTestAsync("CLIの標準入力・選択JSON・単一取得を検証する", CliJsonTests.VerifyAsync);
         await RunTestAsync("Tailscale Serveとローカル接続の信頼境界を守る", RemoteAccessTests.VerifyAsync);
         await RunTestAsync("正式表示名と内部識別子を分離する", TestApplicationDisplayNameAsync);
         await RunTestAsync("画面変更を複数接続へ通知する", TestUiChangeNotifierAsync);

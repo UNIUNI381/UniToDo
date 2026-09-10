@@ -10,6 +10,7 @@
 
 ```text
 taskctl now [--json]
+taskctl get TASK-ID [--json]
 taskctl list [--status 状態] [--search 文字列] [--json]
 taskctl add --title 名称 [--project IDまたは表記] [--minutes 30] [--deadline 日時] [--importance 3]
 taskctl add --file task.json [--project IDまたは表記] [--no-deadline]
@@ -162,3 +163,9 @@ taskctl project prepare "ユーザーが入力した表記" --json
 - 完全削除はユーザーがIDを明示した場合だけ、同じIDを`--confirm`へ指定します。
 - 下書き、要確認、依存未完了のタスクは開始できません。
 - CLIエラーをDB直接編集で回避しません。
+
+## JSON入出力の短縮
+
+UniToDo専用会話では同梱CLIを専用PATHから`taskctl`で直接実行します。`--file -`は標準入力のJSONオブジェクトを読み、一時ファイルが不要です。PowerShell 5.1の日本語パイプ入力では`$OutputEncoding=[Text.Encoding]::UTF8`を同じコマンド内で先に設定します。`--json`は字下げなし・日本語非エスケープで出力します。
+
+読取の`--fields identifier,title,projectIdentifier,status`はJSON出力を兼ね、必要項目だけ返します。ネストはドットで区切り、配列・nullの形は維持します。更新と`project prepare/resolve`には使用できません。書込み前後の確認に必要な項目は省略しません。1件の確認には`get TASK-ID`を使います。

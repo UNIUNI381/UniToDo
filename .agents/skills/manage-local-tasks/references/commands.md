@@ -4,6 +4,7 @@
 
 ```text
 now|list [--json]
+get TASK-ID [--json]
 add ... | update ID --file task.json
 start|complete|continue|interrupt|postpone|cancel ID
 delete ID --confirm ID
@@ -17,9 +18,28 @@ time active|list|start|stop|add|update|extend|confirm|void|report [--json]
 
 不明なオプションは`taskctl <コマンド> --help`で確認する。
 
+## 短いJSON入出力
+
+UniToDo専用会話では専用PATHの`taskctl`を直接実行する。通常のCodexはスキルのラッパーを使用する。
+
+- すべての`--file`入力は`--file -`で標準入力のJSONオブジェクトを読める。既存ファイル入力も使用可能。
+- `--json`は字下げなし・日本語をUnicodeエスケープしないJSONを返す。
+- 読取では`--fields identifier,title,projectIdentifier,status`で必要項目だけを選ぶ。`--json`は省略できる。ネストは`recommendation.task.title`形式。配列の件数、null、空配列を保持する。存在しない項目はエラー。ただしnull・空配列の内部の項目名は検証できない。
+- 対応する読取は`now/list/get`、`project list`、`draft list/get`、`time active/list/report`。`project prepare/resolve`と更新応答は確認情報・警告を省略しない。
+- 書込み前後の確認にはID、projectIdentifier、状態、変更対象を必ず含める。単一タスクは`get ID`を使う。
+
+PowerShell 7での例（5.1では日本語を保つため同じコマンドの先頭に`$OutputEncoding=[Text.Encoding]::UTF8;`を付ける）:
+
+```powershell
+'{"details":"確認済みの補足"}' | taskctl update TASK-ID --file - --json
+taskctl get TASK-ID --fields identifier,projectIdentifier,status,details
+```
+
+長文や引用符を含むJSONには、PowerShellの単一引用符のヒアストリングを使う。本文中の`$`やバッククォートを展開しない。
+
 ## 権限エラー
 
-サンドボックスで`taskctl.exe`が拒否されたら、同じラッパーを`require_escalated`で再実行する。承認prefixは`powershell -NoProfile -ExecutionPolicy Bypass -File <スキル絶対パス>\scripts\invoke-taskctl.ps1`までに限定する。
+UniToDo専用会話では権限不足を報告して停止する。通常のCodexでラッパー実行が拒否されたら、同じラッパーを`require_escalated`で再実行する。承認prefixは`powershell -NoProfile -ExecutionPolicy Bypass -File <スキル絶対パス>\scripts\invoke-taskctl.ps1`までに限定する。
 
 ## PowerShell 5.1
 

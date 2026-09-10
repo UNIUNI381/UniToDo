@@ -22,6 +22,8 @@ public static class CodexChatTests
             Assert(server.StartConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Routine execution must not prompt");
             Assert(server.StartConfiguration.GetProperty("serviceTier").GetString() == "fast", "Web conversation must request fast service tier");
             JsonElement configuration = server.StartConfiguration.GetProperty("config");
+            Assert(configuration.GetProperty("shell_environment_policy.set").GetProperty("PATH").GetString()!.Split(Path.PathSeparator)[0]
+                == AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), "Dedicated PATH must prioritize the installed CLI");
             Assert(!configuration.GetProperty("sandbox_workspace_write.network_access").GetBoolean(), "Network must remain restricted");
             Assert(configuration.GetProperty("sandbox_workspace_write.writable_roots").EnumerateArray().Single().GetString() == AppContext.BaseDirectory, "Only CLI installation may be added");
             ChatSubmission request = new(initial.Conversation, Guid.NewGuid().ToString(), "テスト依頼本文");
@@ -123,16 +125,22 @@ public static class CodexChatTests
                 if (envelope.TryGetProperty("method", out JsonElement method) && method.GetString() == "item/completed")
                 {
                     JsonElement item = envelope.GetProperty("params").GetProperty("item");
+                    // 読取試験の失敗時だけシェル診断を示し、成功時の実データは表示しない。
+                    if (item.GetProperty("type").GetString() == "commandExecution"
+                        && item.TryGetProperty("exitCode", out JsonElement failureCode)
+                        && failureCode.ValueKind == JsonValueKind.Number && failureCode.GetInt32() != 0)
+                        Console.WriteLine(item.GetProperty("aggregatedOutput").GetString());
                     if (item.GetProperty("type").GetString() == "commandExecution"
                         && item.TryGetProperty("exitCode", out JsonElement exitCode) && exitCode.ValueKind == JsonValueKind.Number && exitCode.GetInt32() == 0
-                        && item.GetProperty("command").GetString()!.Contains("invoke-taskctl.ps1")
+                        && item.GetProperty("command").GetString()!.Contains("taskctl")
+                        && !item.GetProperty("command").GetString()!.Contains("invoke-taskctl.ps1")
                         && item.GetProperty("aggregatedOutput").GetString()!.Contains("TASKCTL_OK")) commandSucceeded = true;
                 }
             };
             CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
             ChatSnapshot initial = await service.GetAsync();
             string prompt = verifyTaskCommand
-                ? "通常のタスク操作権限を確認します。指定スキルのinvoke-taskctl.ps1をpowershell -NoProfile -ExecutionPolicy Bypass -Fileで呼び、list --jsonを1回だけ実行してください。出力はPowerShellの変数に格納し、終了コード0かつJSON解析成功のときだけTASKCTL_OKを出力してください。タスク名・内容やJSON原文は出力しないでください。データは変更しないでください。成功した場合は「接続確認できました」とだけ回答してください。"
+                ? "通常のタスク操作権限を確認します。taskctl list --fields identifier を1回だけ直接実行してください。ラッパーや絶対パス、追加のpowershell起動は使わないでください。出力はPowerShellの変数に格納し、終了コード0かつJSON解析成功のときだけTASKCTL_OKを出力してください。タスク名・内容やJSON原文は出力しないでください。データは変更しないでください。成功した場合は「接続確認できました」とだけ回答してください。"
                 : "接続の動作確認です。ツールやスキルの読込み、外部データの参照・変更は一切せず、「接続確認できました」とだけ回答してください。";
             await service.SendAsync(new(initial.Conversation, Guid.NewGuid().ToString(), prompt));
             for (int attempt = 0; attempt < 120; attempt++)
