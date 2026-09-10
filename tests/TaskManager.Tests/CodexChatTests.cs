@@ -16,7 +16,9 @@ public static class CodexChatTests
         try
         {
             FakeServer server = new();
-            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+            string calendarSkillPath = Path.Combine(directory, "google-calendar", "SKILL.md");
+            string calendarAppPath = "app://connector-calendar-test";
+            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier(), calendarSkillPath, calendarAppPath);
             ChatSnapshot initial = await service.GetAsync();
             Assert(server.StartConfiguration.GetProperty("sandbox").GetString() == "workspace-write", "Sandbox must remain restricted to workspace");
             Assert(server.StartConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Routine execution must not prompt");
@@ -26,12 +28,20 @@ public static class CodexChatTests
                 == AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar), "Dedicated PATH must prioritize the installed CLI");
             Assert(!configuration.GetProperty("sandbox_workspace_write.network_access").GetBoolean(), "Network must remain restricted");
             Assert(configuration.GetProperty("sandbox_workspace_write.writable_roots").EnumerateArray().Single().GetString() == AppContext.BaseDirectory, "Only CLI installation may be added");
-            ChatSubmission request = new(initial.Conversation, Guid.NewGuid().ToString(), "テスト依頼本文");
+            ChatSubmission request = new(initial.Conversation, Guid.NewGuid().ToString(), "Googleカレンダーの今日の予定を確認してください。");
             await Task.WhenAll(service.SendAsync(request), service.SendAsync(request));
             Assert(server.SendCount == 1, "Duplicate requests must not run twice");
             Assert(server.TurnConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Each turn must retain no-prompt policy");
             Assert(server.TurnConfiguration.GetProperty("serviceTier").GetString() == "fast", "Each turn must retain fast service tier");
             Assert(!server.TurnConfiguration.GetProperty("sandboxPolicy").GetProperty("networkAccess").GetBoolean(), "Each turn must retain network restriction");
+            JsonElement[] calendarInput = server.TurnConfiguration.GetProperty("input").EnumerateArray().ToArray();
+            Assert(calendarInput[0].GetProperty("text").GetString() == "$google-calendar " + request.Text, "Calendar requests must explicitly invoke the plugin skill");
+            Assert(calendarInput.Any(item => item.GetProperty("type").GetString() == "skill"
+                && item.GetProperty("name").GetString() == "google-calendar"
+                && item.GetProperty("path").GetString() == calendarSkillPath), "Calendar plugin skill path must be passed to App Server");
+            Assert(calendarInput.Any(item => item.GetProperty("type").GetString() == "mention"
+                && item.GetProperty("name").GetString() == "Google Calendar"
+                && item.GetProperty("path").GetString() == calendarAppPath), "Calendar connection must be passed to App Server");
             await RejectAsync(() => service.SendAsync(request with { Text = "別の依頼" }));
             await RejectAsync(() => service.SendAsync(request with { RequestIdentifier = Guid.NewGuid().ToString() }));
             await RejectAsync(() => service.NewAsync(initial.Conversation));
@@ -52,7 +62,7 @@ public static class CodexChatTests
             await service.InterruptAsync(initial.Conversation);
             Assert(service.Snapshot().Status == "idle", "Interrupt must release active turn");
             string stored = File.ReadAllText(Path.Combine(directory, "codex-chat-state.json"));
-            Assert(!stored.Contains("テスト依頼本文") && !stored.Contains("回答"), "App state must not persist conversation content");
+            Assert(!stored.Contains(request.Text) && !stored.Contains("回答"), "App state must not persist conversation content");
             CodexChatService restored = new(new FakeServer(), new TaskManagerPaths(), new UiChangeNotifier());
             await restored.GetAsync();
             await restored.SendAsync(request);

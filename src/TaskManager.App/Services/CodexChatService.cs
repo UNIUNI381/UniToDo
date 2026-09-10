@@ -17,12 +17,16 @@ public sealed record ChatStoredState(string Conversation, string? Thread, ChatRe
 /// <summary>UIに依存しない単一会話・実行・確認待ちの状態を管理する。</summary>
 public sealed class CodexChatService
 {
-    // 通信先、更新通知、保存先と固定スキルの場所を保持する。
+    // 通信先、更新通知、保存先と投入するスキルの場所を保持する。
     private readonly ICodexAppServer server;
     private readonly UiChangeNotifier changes;
     private readonly string statePath;
     private readonly string workspace;
     private readonly string skillPath;
+    // Google Calendar依頼でだけ投入するプラグインスキルの場所を保持する。
+    private readonly string? calendarSkillPath;
+    // Google Calendar依頼でだけ投入する接続アプリの参照を保持する。
+    private readonly string? calendarAppPath;
     // 通知の同期と利用者の操作の直列化を別々に保持する。
     private readonly object stateLock = new();
     private readonly SemaphoreSlim actions = new(1, 1);
@@ -39,7 +43,12 @@ public sealed class CodexChatService
     // 音声送信へ完了・確認待ち・切断時点の表示内容を渡す通知を保持する。
     public event Action<ChatSnapshot>? ResponseAvailable;
 
-    public CodexChatService(ICodexAppServer server, TaskManagerPaths paths, UiChangeNotifier changes)
+    public CodexChatService(
+        ICodexAppServer server,
+        TaskManagerPaths paths,
+        UiChangeNotifier changes,
+        string? calendarSkillPath = null,
+        string? calendarAppPath = null)
     {
         // 会話内容はCodex側へ保存し、アプリには識別子と送信重複防止情報だけを保存する。
         this.server = server;
@@ -47,6 +56,8 @@ public sealed class CodexChatService
         statePath = Path.Combine(paths.DataDirectory, "codex-chat-state.json");
         workspace = Path.Combine(paths.DataDirectory, "assistant-workspace");
         skillPath = Path.Combine(AppContext.BaseDirectory, "assistant-skill", "SKILL.md");
+        this.calendarSkillPath = calendarSkillPath ?? FindGoogleCalendarSkillPath();
+        this.calendarAppPath = calendarAppPath ?? FindGoogleCalendarAppPath(this.calendarSkillPath);
         stored = File.Exists(statePath)
             ? JsonSerializer.Deserialize<ChatStoredState>(File.ReadAllText(statePath)) ?? throw new InvalidOperationException("Codex会話情報を読み込めません。")
             : new(Guid.NewGuid().ToString("N"), null, []);
@@ -171,7 +182,7 @@ public sealed class CodexChatService
                 JsonElement result = await server.CallAsync("turn/start", new
                 {
                     threadId = stored.Thread, clientUserMessageId = submission.RequestIdentifier,
-                    input = new object[] { new { type = "text", text = submission.Text }, new { type = "skill", name = "manage-local-tasks", path = skillPath } },
+                    input = BuildTurnInput(submission.Text),
                     effort = "low", serviceTier = "fast", approvalPolicy = "never", approvalsReviewer = "user",
                     // 復元済み会話にも毎回同じ限定権限を適用し、旧設定へ戻ることを防ぐ。
                     sandboxPolicy = new { type = "workspaceWrite", writableRoots = new[] { workspace, AppContext.BaseDirectory }, networkAccess = false }
@@ -191,6 +202,100 @@ public sealed class CodexChatService
             return Snapshot();
         }
         finally { actions.Release(); }
+    }
+
+    private object[] BuildTurnInput(string text)
+    {
+        // Calendar依頼だけを明示スキルに結び付け、通常のタスク操作へ余分な指示を送らない。
+        object taskSkill = new { type = "skill", name = "manage-local-tasks", path = skillPath };
+        if (calendarSkillPath is null || !RequiresGoogleCalendarSkill(text))
+            return [new { type = "text", text }, taskSkill];
+        List<object> input = [
+            new { type = "text", text = "$google-calendar " + text },
+            taskSkill,
+            new { type = "skill", name = "google-calendar", path = calendarSkillPath }
+        ];
+        if (calendarAppPath is not null)
+            input.Add(new { type = "mention", name = "Google Calendar", path = calendarAppPath });
+        return input.ToArray();
+    }
+
+    private static bool RequiresGoogleCalendarSkill(string text)
+    {
+        // 予定確認・変更に使う自然な表現だけを検出してGoogle Calendarスキルを投入する。
+        string[] keywords = [
+            "google calendar", "googleカレンダー", "グーグルカレンダー", "カレンダー", "予定表",
+            "予定", "会議", "ミーティング", "スケジュール", "空き時間", "空いて"
+        ];
+        return keywords.Any(keyword => text.Contains(keyword, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? FindGoogleCalendarSkillPath()
+    {
+        // 有効なCodexプラグインのキャッシュから標準Google Calendarスキルだけを解決する。
+        try
+        {
+            string cacheDirectory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".codex", "plugins", "cache", "openai-curated", "google-calendar");
+            if (!Directory.Exists(cacheDirectory)) return null;
+            return Directory.EnumerateFiles(cacheDirectory, "SKILL.md", SearchOption.AllDirectories)
+                .Where(path => string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), "google-calendar", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+        }
+        catch (IOException)
+        {
+            // プラグイン更新中などに読めない場合は通常会話を継続する。
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // プラグインキャッシュへアクセスできない場合は通常会話を継続する。
+            return null;
+        }
+    }
+
+    private static string? FindGoogleCalendarAppPath(string? skillPath)
+    {
+        // スキルと同じプラグイン定義から接続アプリIDを読み、App Serverのmention形式へ変換する。
+        if (skillPath is null) return null;
+        try
+        {
+            DirectoryInfo? skillDirectory = new FileInfo(skillPath).Directory;
+            string? pluginDirectory = skillDirectory?.Parent?.Parent?.FullName;
+            if (pluginDirectory is null) return null;
+            string appDefinitionPath = Path.Combine(pluginDirectory, ".app.json");
+            if (!File.Exists(appDefinitionPath)) return null;
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(appDefinitionPath));
+            JsonElement appIdentifier = document.RootElement
+                .GetProperty("apps")
+                .GetProperty("google-calendar")
+                .GetProperty("id");
+            return appIdentifier.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(appIdentifier.GetString())
+                ? "app://" + appIdentifier.GetString()
+                : null;
+        }
+        catch (IOException)
+        {
+            // プラグイン更新中などに読めない場合はスキルだけで通常会話を継続する。
+            return null;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // プラグインキャッシュへアクセスできない場合はスキルだけで通常会話を継続する。
+            return null;
+        }
+        catch (JsonException)
+        {
+            // 壊れたプラグイン定義は接続アプリとして投入しない。
+            return null;
+        }
+        catch (KeyNotFoundException)
+        {
+            // 期待するGoogle Calendarアプリ定義がない場合はスキルだけで通常会話を継続する。
+            return null;
+        }
     }
 
     public async Task<ChatSnapshot> NewAsync(string conversation)
