@@ -259,7 +259,15 @@
     if (snapshot) operate("/reconnect", { conversation: snapshot.conversation });
     else poll();
   });
-  document.getElementById("assistant-form").addEventListener("submit", async (event) => {
+  const assistantForm = document.getElementById("assistant-form");
+  const sendButton = document.getElementById("assistant-send");
+  textInput.addEventListener("keydown", (event) => {
+    // IME変換中を除くCtrl+Enterで、送信ボタンと同じフォーム送信を実行する。
+    if (event.key !== "Enter" || !event.ctrlKey || event.isComposing) return;
+    event.preventDefault();
+    if (!sendButton.disabled) assistantForm.requestSubmit(sendButton);
+  });
+  assistantForm.addEventListener("submit", async (event) => {
     // 同じ入力を再試行するときは同じ識別子を再利用する。
     event.preventDefault();
     const text = textInput.value.trim();

@@ -2,6 +2,8 @@
 
 ## 構成
 
+入力欄はEnterで改行し、IME変換中を除くCtrl+Enterまたは送信ボタンで本文を送信します。
+
 PCとAndroidの「Codexでタスク管理」は、UniToDo内の同じ専用会話を開きます。PCでは右パネル、スマホでは全面表示です。PC幅（681px以上）ではパネル外のクリックでも閉じます。パネル内と「Codexでタスク管理」ボタンのクリックでは閉じません。閉じても入力内容・会話・実行は保持し、表示用ポーリングだけを停止します。外部のCodexアプリへ移動せず、本文送信、逐次応答、質問への回答、今回のみの実行承認・拒否、停止、履歴再取得、新しい会話を扱います。履歴は末尾200項目、各本文は最大64,000文字を表示します。独自ターミナルや任意RPCは公開しません。Androidでは`interactive-widget=resizes-content`でキーボード表示時にViewportを縮小し、`visualViewport`の高さ・位置変更にもパネルを追従させます。開いた直後と入力中は最新の発言を表示し、縦幅が狭い場合は入力領域をコンパクトにします。
 
 `assistant.js` → `/api/v1/assistant` → `CodexChatService` → `ICodexAppServer` → `codex app-server --listen stdio://`で接続します。App Serverのネットワーク待受は作りません。既存のPC側Codex CLIとChatGPTログインを利用し、OpenAI APIや独自の認証情報保存は追加しません。モデルは音声送信と同じ`gpt-5.6-luna`、推論は`low`、サービスティアは`fast`です。検証したCLIは0.146.0です。プロトコル変更時はインストール済みCLIの`generate-json-schema`と公式資料で互換性を確認します。

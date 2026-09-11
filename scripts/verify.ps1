@@ -94,6 +94,16 @@ function Assert-ApplicationDisplayName {
     }
 }
 
+function Assert-AssistantKeyboardSubmission {
+    # Codex会話のCtrl+Enter送信とIME変換中の誤送信防止を検査する。 ASCII.
+    $assistantSource = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\wwwroot\assistant.js") -Raw -Encoding UTF8
+    foreach ($requiredPattern in @('event\.key !== "Enter"', '!event\.ctrlKey', 'event\.isComposing', 'assistantForm\.requestSubmit\(sendButton\)')) {
+        if ($assistantSource -notmatch $requiredPattern) {
+            throw "The Codex assistant Ctrl+Enter submission guard is missing: $requiredPattern"
+        }
+    }
+}
+
 function Assert-WatchdogInstallation {
     # Codexの実行ジョブ外で監視親を起動し、誤ったユーザーパスをショートカットへ保存しないことを検査する。 ASCII.
     $installerPaths = @(
@@ -287,6 +297,7 @@ Assert-NoForbiddenIntegration
 Assert-FrameworkAndAddress
 Assert-ApplicationIcon
 Assert-ApplicationDisplayName
+Assert-AssistantKeyboardSubmission
 Assert-WatchdogInstallation
 Assert-WatchdogUninstallation
 Assert-DistributionSecretExclusions
