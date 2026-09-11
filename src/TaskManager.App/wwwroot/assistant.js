@@ -19,6 +19,9 @@
   // キーボード開閉前の末尾追従状態とViewport更新の予約を保持する。
   let followLatest = true;
   let viewportFrame = null;
+  // 閉じるボタンによる履歴移動の完了待ちと、その解除処理を保持する。
+  let closingNavigation = null;
+  let finishClosingNavigation = null;
 
   function updateViewport() {
     // Androidの表示可能領域へ高さと位置を合わせ、キーボード背後へのはみ出しを防ぐ。
@@ -248,7 +251,12 @@
   window.unitodoAssistant = {
     async open() {
       // PCでは右パネル、狭い画面では全面パネルとして開く。
+      if (closingNavigation) await closingNavigation;
       const wasHidden = panel.classList.contains("hidden");
+      if (wasHidden && window.matchMedia("(max-width: 680px)").matches && !window.history.state?.unitodoAssistant) {
+        // 同じページ内に会話表示の履歴を積み、Androidの戻る操作を受け止める。
+        window.history.pushState({ ...window.history.state, unitodoAssistant: true }, "");
+      }
       panel.classList.remove("hidden");
       followLatest = true;
       updateViewport();
@@ -263,7 +271,31 @@
   function closePanel() {
     // 表示だけを閉じてPC側の実行状態は維持する。
     panel.classList.add("hidden");
+    if (panel.contains(document.activeElement)) document.activeElement.blur();
     window.clearTimeout(pollTimer);
+    if (window.history.state?.unitodoAssistant && !closingNavigation) {
+      // ボタンで閉じた場合も会話分の履歴を戻し、再開を繰り返しても履歴を増やさない。
+      closingNavigation = new Promise(resolve => {
+        // 非同期の履歴移動後に再表示を許可する。
+        finishClosingNavigation = resolve;
+      });
+      window.history.back();
+    }
+  }
+
+  window.addEventListener("popstate", () => {
+    // 戻る操作では会話だけを閉じ、進む操作では同じ会話を再表示する。
+    const finish = finishClosingNavigation;
+    closingNavigation = null;
+    finishClosingNavigation = null;
+    if (window.history.state?.unitodoAssistant) window.unitodoAssistant.open();
+    else closePanel();
+    finish?.();
+  });
+
+  if (window.history.state?.unitodoAssistant) {
+    // 会話表示中の再読み込みでも履歴とパネル表示を一致させる。
+    window.unitodoAssistant.open();
   }
 
   document.getElementById("assistant-close").addEventListener("click", closePanel);
