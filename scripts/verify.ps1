@@ -104,6 +104,15 @@ function Assert-AssistantKeyboardSubmission {
     }
 }
 
+function Assert-AssistantPanelDismissal {
+    # Codex会話の欄外判定がポインターの押下開始時に行われることを検査する。 ASCII.
+    $assistantSource = Get-Content -LiteralPath (Join-Path $ProjectRoot "src\TaskManager.App\wwwroot\assistant.js") -Raw -Encoding UTF8
+    if ($assistantSource -notmatch 'document\.addEventListener\("pointerdown"' -or
+        $assistantSource -match 'document\.addEventListener\("click", \(event\) =>') {
+        throw "The Codex assistant must dismiss the panel from the pointer-down origin, not the completed click target."
+    }
+}
+
 function Assert-WatchdogInstallation {
     # Codexの実行ジョブ外で監視親を起動し、誤ったユーザーパスをショートカットへ保存しないことを検査する。 ASCII.
     $installerPaths = @(
@@ -298,6 +307,7 @@ Assert-FrameworkAndAddress
 Assert-ApplicationIcon
 Assert-ApplicationDisplayName
 Assert-AssistantKeyboardSubmission
+Assert-AssistantPanelDismissal
 Assert-WatchdogInstallation
 Assert-WatchdogUninstallation
 Assert-DistributionSecretExclusions

@@ -238,8 +238,8 @@
   }
 
   document.getElementById("assistant-close").addEventListener("click", closePanel);
-  document.addEventListener("click", (event) => {
-    // PCの欄外クリックで閉じ、パネル内と開くボタンの操作はそのまま受け付ける。
+  document.addEventListener("pointerdown", (event) => {
+    // PCで押し始めた位置が欄外のときだけ閉じ、パネル内からのドラッグは維持する。
     if (window.matchMedia("(max-width: 680px)").matches || panel.classList.contains("hidden")) return;
     if (panel.contains(event.target) || event.target instanceof Element && event.target.closest("[data-open-codex-task-thread]")) return;
     closePanel();
