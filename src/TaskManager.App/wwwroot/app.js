@@ -3213,6 +3213,9 @@ function renderTimeReport(report, entries) {
   document.getElementById("time-total-duration").textContent = formatDuration(report.totalSeconds);
   document.getElementById("time-review-count").textContent = `${report.reviewCount}件`;
   document.getElementById("time-overlap-count").textContent = `${report.overlapCount}件`;
+  // 要確認と重複ログは、それぞれ件数がある場合だけカードを表示する。
+  document.getElementById("time-review-count").closest(".time-summary-card").classList.toggle("hidden", report.reviewCount === 0);
+  document.getElementById("time-overlap-count").closest(".time-summary-card").classList.toggle("hidden", report.overlapCount === 0);
   renderTimeReportChart(report);
 
   const projectSummaryBody = document.getElementById("time-project-summary");
