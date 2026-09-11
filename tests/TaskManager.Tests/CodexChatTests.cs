@@ -17,7 +17,7 @@ public static class CodexChatTests
         {
             FakeServer server = new();
             string calendarAppPath = "app://connector-calendar-test";
-            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier(), new CalendarSynchronizationQueue());
             ChatSnapshot initial = await service.GetAsync();
             Assert(server.StartConfiguration.GetProperty("sandbox").GetString() == "workspace-write", "Sandbox must remain restricted to workspace");
             Assert(server.StartConfiguration.GetProperty("approvalPolicy").GetString() == "never", "Routine execution must not prompt");
@@ -61,7 +61,7 @@ public static class CodexChatTests
             Assert(service.Snapshot().Status == "idle", "Interrupt must release active turn");
             string stored = File.ReadAllText(Path.Combine(directory, "codex-chat-state.json"));
             Assert(!stored.Contains(request.Text) && !stored.Contains("回答"), "App state must not persist conversation content");
-            CodexChatService restored = new(new FakeServer(), new TaskManagerPaths(), new UiChangeNotifier());
+            CodexChatService restored = new(new FakeServer(), new TaskManagerPaths(), new UiChangeNotifier(), new CalendarSynchronizationQueue());
             await restored.GetAsync();
             await restored.SendAsync(request);
             Assert(restored.Snapshot().Status == "idle", "Restart must retain deduplication receipts");
@@ -111,6 +111,7 @@ public static class CodexChatTests
             await VerifyApplicationsAsync();
             await VerifyArchivedAsync();
             await VerifyMcpFormsAsync();
+            await VerifyCalendarSynchronizationAsync();
         }
         finally
         {
@@ -123,7 +124,7 @@ public static class CodexChatTests
     {
         // 再開会話、単語のない追送、無効化、接続失敗を実通信なしで検証する。
         FakeServer server = new();
-        CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+        CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier(), new CalendarSynchronizationQueue());
         ChatSnapshot initial = await service.GetAsync();
         foreach (string text in new[] { "それを登録して", "今やるタスクを教えて", "Move it to Friday" })
         {
@@ -161,7 +162,7 @@ public static class CodexChatTests
         FakeServer server = new() { ArchivedMethod = "thread/resume" };
         TaskManagerPaths paths = new();
         string originalState = File.ReadAllText(Path.Combine(paths.DataDirectory, "codex-chat-state.json"));
-        CodexChatService service = new(server, paths, new UiChangeNotifier());
+        CodexChatService service = new(server, paths, new UiChangeNotifier(), new CalendarSynchronizationQueue());
         ChatSnapshot archived = await service.GetAsync();
         Assert(archived.Status == "archived" && !string.IsNullOrWhiteSpace(archived.Conversation)
             && archived.Error!.Contains("新しい会話"), "Archived resume must return a recoverable snapshot");
@@ -200,17 +201,93 @@ public static class CodexChatTests
 
         // 一般的な通信障害はアーカイブ扱いせず、自動的な会話切替を行わない。
         FakeServer failedServer = new() { FailResume = true };
-        CodexChatService failedService = new(failedServer, paths, new UiChangeNotifier());
+        CodexChatService failedService = new(failedServer, paths, new UiChangeNotifier(), new CalendarSynchronizationQueue());
         await RejectAsync(failedService.GetAsync);
         Assert(failedService.Snapshot().Status != "archived" && !failedServer.Methods.Contains("thread/start"),
             "Unrelated resume failures must not be treated as archive evidence");
+    }
+
+    private static async Task VerifyCalendarSynchronizationAsync()
+    {
+        // 実際の予定へ触れず、成功通知・重複・別会話・失敗・履歴再表示の同期境界を検証する。
+        FakeServer server = new();
+        CalendarSynchronizationQueue synchronization = new();
+        CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier(), synchronization);
+        ChatSnapshot initial = await service.GetAsync();
+        await service.SendAsync(new(initial.Conversation, Guid.NewGuid().ToString(), "それを登録して"));
+        JsonElement Item(string identifier, string tool = "google_calendar.create_event", string status = "completed",
+            string source = "codex_apps", object? error = null)
+        {
+            // 本文ではなく実際のMCP完了通知と同じ識別情報を組み立てる。
+            return JsonSerializer.SerializeToElement(new { id = identifier, type = "mcpToolCall", server = source, tool, status, error });
+        }
+        void Emit(JsonElement item, string method = "item/completed", string thread = "test-thread", string turn = "turn-one")
+        {
+            // 所有会話と実行を切り替えて通知の選別を検査する。
+            server.Emit(new { method, @params = new { threadId = thread, turnId = turn, item } });
+        }
+        JsonElement created = Item("created");
+        Emit(created, "item/started");
+        Emit(created, thread: "another-thread");
+        Emit(created, turn: "another-turn");
+        Emit(Item("other", "google_drive.create_file"));
+        Emit(Item("wrong-server", source: "another-server"));
+        Emit(Item("failed", status: "failed"));
+        Emit(Item("denied", error: new { message = "Denied" }));
+        await AssertNoCalendarSynchronizationAsync(synchronization);
+
+        // 作成・更新・削除・読取の成功直後に、会話完了を待たず同期を要求する。
+        foreach (string tool in new[] { "google_calendar.create_event", "google_calendar.update_event", "google_calendar.delete_event", "google_calendar_get_events" })
+        {
+            Emit(Item(tool, tool));
+            await synchronization.WaitAsync(CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        }
+        Assert(service.Snapshot().Status == "running", "Synchronization must not require turn completion");
+        Emit(created);
+        await synchronization.WaitAsync(CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        Emit(created);
+        server.Emit(new { method = "turn/completed", @params = new { threadId = "test-thread",
+            turn = new { id = "turn-one", status = "interrupted", items = new[] { created } } } });
+        await AssertNoCalendarSynchronizationAsync(synchronization);
+        Assert(service.Snapshot().Status == "idle", "Calendar synchronization must not block interrupted turn completion");
+
+        // 個別完了がなくても終端に含まれる成功は取り込み、履歴の再取得では再同期しない。
+        JsonElement finalItem = Item("final-only");
+        server.Emit(new { method = "turn/completed", @params = new { threadId = "test-thread",
+            turn = new { id = "turn-one", status = "failed", items = new[] { finalItem } } } });
+        await synchronization.WaitAsync(CancellationToken.None).AsTask().WaitAsync(TimeSpan.FromSeconds(2));
+        server.HistoryTurns = [new { id = "past-turn", status = "completed", items = new[] { Item("past-operation") } }];
+        await service.ReconnectAsync(initial.Conversation);
+        server.CutConnection();
+        await service.GetAsync();
+        await AssertNoCalendarSynchronizationAsync(synchronization);
+
+        // 待機中の連続要求をまとめ、実行中に届いた要求は次回分として保持する。
+        synchronization.Request();
+        synchronization.Request();
+        await synchronization.WaitAsync(CancellationToken.None);
+        await AssertNoCalendarSynchronizationAsync(synchronization);
+        synchronization.Request();
+        await synchronization.WaitAsync(CancellationToken.None);
+        await AssertNoCalendarSynchronizationAsync(synchronization);
+    }
+
+    private static async Task AssertNoCalendarSynchronizationAsync(CalendarSynchronizationQueue synchronization)
+    {
+        // 待機が即座に完了しないことを確認し、検査用の待機だけを取り消す。
+        using CancellationTokenSource cancellation = new();
+        Task pending = synchronization.WaitAsync(cancellation.Token).AsTask();
+        try { Assert(!pending.IsCompleted, "Unexpected calendar synchronization request"); }
+        finally { cancellation.Cancel(); }
+        try { await pending; }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
     }
 
     private static async Task VerifyMcpFormsAsync()
     {
         // 外部MCPの確認を保存した要求へ一度だけ返し、自動承認や回答の取違えを防ぐ。
         FakeServer server = new();
-        CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+        CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier(), new CalendarSynchronizationQueue());
         ChatSnapshot initial = await service.GetAsync();
         JsonElement empty = JsonSerializer.SerializeToElement(new { type = "object", properties = new { } });
         void Request(JsonElement schema, string mode = "form")
@@ -298,7 +375,7 @@ public static class CodexChatTests
                         && item.GetProperty("aggregatedOutput").GetString()!.Contains("TASKCTL_OK")) commandSucceeded = true;
                 }
             };
-            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier());
+            CodexChatService service = new(server, new TaskManagerPaths(), new UiChangeNotifier(), new CalendarSynchronizationQueue());
             ChatSnapshot initial = await service.GetAsync();
             string prompt = verifyCalendar
                 ? "接続確認です。Google Calendarプラグインのget_colorsを1回実行してください。予定や個人情報の取得、予定登録・変更・削除はしないでください。成功したら「接続確認できました」と回答してください。"
@@ -355,6 +432,8 @@ public static class CodexChatTests
         public string? ArchivedMethod { get; set; }
         public bool FailResume { get; set; }
         public List<string> Methods { get; } = [];
+        // 履歴再表示による不要な再同期がないことを検証する項目を保持する。
+        public object[] HistoryTurns { get; set; } = [];
         // 接続アプリの現在状態、要求設定と取得失敗を保持する。
         public bool FailApplications { get; set; }
         public JsonElement AppConfiguration { get; private set; }
@@ -387,7 +466,7 @@ public static class CodexChatTests
             if (method is "thread/start" or "thread/resume" or "thread/read")
             {
                 StartConfiguration = JsonSerializer.SerializeToElement(parameters);
-                return Task.FromResult(JsonSerializer.SerializeToElement(new { thread = new { id = "test-thread", turns = Array.Empty<object>() } }));
+                return Task.FromResult(JsonSerializer.SerializeToElement(new { thread = new { id = "test-thread", turns = HistoryTurns } }));
             }
             if (method == "turn/start")
             {

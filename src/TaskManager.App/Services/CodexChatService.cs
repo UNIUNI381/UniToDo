@@ -23,6 +23,9 @@ public sealed class CodexChatService
     private readonly string statePath;
     private readonly string workspace;
     private readonly string skillPath;
+    // Calendar同期要求と、同じ操作の完了通知を再処理しないための識別子を保持する。
+    private readonly CalendarSynchronizationQueue calendarSynchronization;
+    private readonly HashSet<string> synchronizedCalendarItems = [];
     // 通知の同期と利用者の操作の直列化を別々に保持する。
     private readonly object stateLock = new();
     private readonly SemaphoreSlim actions = new(1, 1);
@@ -42,11 +45,13 @@ public sealed class CodexChatService
     public CodexChatService(
         ICodexAppServer server,
         TaskManagerPaths paths,
-        UiChangeNotifier changes)
+        UiChangeNotifier changes,
+        CalendarSynchronizationQueue calendarSynchronization)
     {
         // 会話内容はCodex側へ保存し、アプリには識別子と送信重複防止情報だけを保存する。
         this.server = server;
         this.changes = changes;
+        this.calendarSynchronization = calendarSynchronization;
         statePath = Path.Combine(paths.DataDirectory, "codex-chat-state.json");
         workspace = Path.Combine(paths.DataDirectory, "assistant-workspace");
         skillPath = Path.Combine(AppContext.BaseDirectory, "assistant-skill", "SKILL.md");
@@ -289,6 +294,7 @@ public sealed class CodexChatService
                 turn = null;
                 prompts.Clear();
                 messages.Clear();
+                synchronizedCalendarItems.Clear();
             }
             await EnsureReadyAsync();
             return Snapshot();
@@ -428,6 +434,7 @@ public sealed class CodexChatService
                 foreach (string key in prompts.Where(pair => pair.Value.Identifier.ToString() == resolved.ToString()).Select(pair => pair.Key).ToArray()) prompts.Remove(key);
             if (method == "turn/started") { turn = Text(parameters.GetProperty("turn"), "id"); status = "running"; }
             if (method is "item/started" or "item/completed") ApplyItem(parameters.GetProperty("item"));
+            if (method == "item/completed") RequestCalendarSynchronization(parameters.GetProperty("item"));
             if (method == "item/agentMessage/delta")
             {
                 string itemIdentifier = Text(parameters, "itemId");
@@ -438,7 +445,12 @@ public sealed class CodexChatService
             {
                 JsonElement completed = parameters.GetProperty("turn");
                 if (turn is not null && Text(completed, "id") != turn) return;
-                if (completed.TryGetProperty("items", out JsonElement items)) foreach (JsonElement item in items.EnumerateArray()) ApplyItem(item);
+                if (completed.TryGetProperty("items", out JsonElement items))
+                    foreach (JsonElement item in items.EnumerateArray())
+                    {
+                        ApplyItem(item);
+                        RequestCalendarSynchronization(item);
+                    }
                 status = "idle";
                 error = Text(completed, "status") == "failed" ? "Codexの処理が失敗しました。履歴を確認してから次の依頼を送信してください。"
                     : Text(completed, "status") == "interrupted" ? "処理を停止しました。実行済みの変更は取り消されません。" : null;
@@ -448,6 +460,19 @@ public sealed class CodexChatService
                 changes.Publish("codex", "");
             }
         }
+    }
+
+    private void RequestCalendarSynchronization(JsonElement item)
+    {
+        // 本文の推測や履歴の再表示ではなく、所有会話のCalendarツール成功だけを同期契機にする。
+        string tool = Text(item, "tool");
+        string identifier = Text(item, "id");
+        if (Text(item, "type") != "mcpToolCall" || Text(item, "server") != "codex_apps"
+            || !(tool.StartsWith("google_calendar.", StringComparison.Ordinal)
+                || tool.StartsWith("google_calendar_", StringComparison.Ordinal))
+            || Text(item, "status") != "completed" || identifier.Length == 0
+            || (item.TryGetProperty("error", out JsonElement failure) && failure.ValueKind != JsonValueKind.Null)) return;
+        if (synchronizedCalendarItems.Add(identifier)) calendarSynchronization.Request();
     }
 
     private void ApplyItem(JsonElement item)

@@ -315,6 +315,7 @@ public static class Program
         services.AddSingleton<TimeReportService>();
         services.AddSingleton<DpapiDataStore>();
         services.AddSingleton<GoogleCalendarService>();
+        services.AddSingleton<CalendarSynchronizationQueue>();
         services.AddSingleton<CodexReviewService>();
         services.AddSingleton<CodexSubmissionQueue>();
         services.AddSingleton<CodexDesktopLauncher>();
@@ -339,6 +340,7 @@ public static class Program
         services.AddSingleton<TaskManagerTray>();
         services.AddSingleton<IUserNotificationService>(serviceProvider => serviceProvider.GetRequiredService<TaskManagerTray>());
         services.AddHostedService<AutomationWorker>();
+        services.AddHostedService<CalendarSynchronizationWorker>();
         services.AddHostedService<CodexSubmissionWorker>();
     }
 
