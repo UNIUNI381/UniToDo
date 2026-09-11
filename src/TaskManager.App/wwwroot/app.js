@@ -42,6 +42,8 @@ const applicationState = {
   dashboardResult: null,
   // 空き時間外でも推薦候補を一時表示するかを保持する。
   forceRecommendationDisplay: false,
+  // タスク開始の確認中・送信中の重複操作を防ぐ。
+  taskStartPending: false,
   // 作業時間画面の期間、基準日、集計、ログを保持する。
   timeReportPeriod: "day",
   timeReportAnchor: new Date(),
@@ -1461,7 +1463,11 @@ function confirmNonRunningCompletion(actionButton) {
 async function executeTaskAction(taskIdentifier, actionName) {
   // 重大な中止操作だけ確認してからAPIを呼び出す。
   if (actionName === "cancel" && !window.confirm(`タスク ${taskIdentifier} を中止しますか？`)) return;
+  if (actionName === "start" && applicationState.taskStartPending) return;
+  if (actionName === "start") applicationState.taskStartPending = true;
   try {
+    // 別の活動が進行中なら終了方法を選んでから開始する。
+    if (actionName === "start" && !await prepareTaskStart(taskIdentifier)) return;
     await apiRequest(`/api/v1/tasks/${encodeURIComponent(taskIdentifier)}/actions/${actionName}`, {
       method: "POST",
       body: JSON.stringify({ postponeMinutes: actionName === "postpone" ? 60 : null })
@@ -1474,7 +1480,62 @@ async function executeTaskAction(taskIdentifier, actionName) {
     await Promise.all([loadDashboard(), loadTasks()]);
   } catch (error) {
     showNotice(error.message, true);
+  } finally {
+    if (actionName === "start") applicationState.taskStartPending = false;
   }
+}
+
+/** 現在の活動を確認し、利用者が選んだ終了操作を適用する。 */
+async function prepareTaskStart(taskIdentifier) {
+  // 最新のタイマーを読み、同じタスクの再開始は行わない。
+  const activeEntry = await apiRequest("/api/v1/time-entries/active");
+  if (!activeEntry) return true;
+  if (activeEntry.taskIdentifier === taskIdentifier) {
+    showNotice("このタスクは既に実行中です。");
+    return false;
+  }
+  const selection = await chooseTaskSwitchAction(activeEntry);
+  if (selection === "cancel") return false;
+  // 選択中に別画面でタイマーが変わった場合は切替を取り消す。
+  const currentEntry = await apiRequest("/api/v1/time-entries/active");
+  if (currentEntry?.identifier !== activeEntry.identifier) {
+    throw new Error("実行中の活動が変わりました。もう一度実行してください。");
+  }
+  const commandPath = activeEntry.taskIdentifier
+    ? `/api/v1/tasks/${encodeURIComponent(activeEntry.taskIdentifier)}/actions/${selection}`
+    : `/api/v1/time-entries/${encodeURIComponent(activeEntry.identifier)}/stop`;
+  await apiRequest(commandPath, { method: "POST", body: "{}" });
+  // 後続の開始に失敗しても終了済みの状態を画面へ反映する。
+  await Promise.all([loadDashboard(), loadTasks()]);
+  return true;
+}
+
+/** タスク切替時の終了方法を選ぶダイアログを表示する。 */
+function chooseTaskSwitchAction(activeEntry) {
+  // キャンセルとEscapeは現在の活動を維持する。
+  return new Promise(function awaitSwitchSelection(resolve) {
+    // 活動名はエスケープし、タスクと自由活動で選択肢を切り替える。
+    const dialog = document.createElement("dialog");
+    dialog.setAttribute("aria-labelledby", "task-switch-title");
+    dialog.innerHTML = `<form method="dialog" style="padding:24px">
+      <div class="dialog-header"><h2 id="task-switch-title">現在の活動をどうしますか？</h2></div>
+      <p>${escapeHtml(activeEntry.title)}${activeEntry.taskIdentifier ? " を実行中です。" : " を計測中です。"}</p>
+      <p>終了方法を選ぶと、選択したタスクを実行します。</p>
+      <div class="dialog-actions">
+        ${activeEntry.taskIdentifier
+          ? `<button value="complete" class="primary-button">完了</button><button value="interrupt" class="secondary-button">中断</button>`
+          : `<button value="stop" class="primary-button">停止</button>`}
+        <button value="cancel" class="secondary-button" autofocus>キャンセル</button>
+      </div></form>`;
+    dialog.addEventListener("close", function handleSwitchClose() {
+      // ダイアログを除去して選択結果を呼び出し元へ返す。
+      const selection = dialog.returnValue || "cancel";
+      dialog.remove();
+      resolve(selection);
+    }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+  });
 }
 
 /** 全タスクを取得して一覧と下書きを更新する。 */
@@ -1582,14 +1643,17 @@ function renderTaskTable() {
       <td class="task-remaining-column">${task.remainingMinutes}分</td>
       <td class="task-importance-column">${task.importance}</td>
       <td class="task-score-column">${formatTaskPriorityScore(task)}</td>
-      <td><div class="task-actions"><button class="text-button edit-task-button" data-task="${escapeAttribute(task.identifier)}">編集</button><button class="text-button cancel-task-button" data-task="${escapeAttribute(task.identifier)}">中止</button></div></td>
+      <td><div class="task-actions"><button class="text-button edit-task-button" data-task="${escapeAttribute(task.identifier)}">編集</button><button class="text-button start-task-button" data-task="${escapeAttribute(task.identifier)}" ${task.status !== "実行可能" ? "disabled" : ""}>実行</button></div></td>
     </tr>`;
   }).join("");
   for (const editButton of tableBody.querySelectorAll(".edit-task-button")) {
     editButton.addEventListener("click", function handleEditClick() { openTaskDialog(editButton.dataset.task); });
   }
-  for (const cancelButton of tableBody.querySelectorAll(".cancel-task-button")) {
-    cancelButton.addEventListener("click", async function handleCancelClick() { await executeTaskAction(cancelButton.dataset.task, "cancel"); });
+  for (const startButton of tableBody.querySelectorAll(".start-task-button")) {
+    startButton.addEventListener("click", async function handleStartClick() {
+      // 一覧の選択タスクを共通の切替確認経由で開始する。
+      await executeTaskAction(startButton.dataset.task, "start");
+    });
   }
 }
 
