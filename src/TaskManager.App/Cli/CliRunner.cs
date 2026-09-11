@@ -967,6 +967,11 @@ public sealed class CliRunner
     /// <summary>文字列を日時へ変換する。</summary>
     private static DateTimeOffset? ParseDate(string? value)
     {
+        // 日付だけの期限はJSON入力と同じローカル20時へ補完する。
+        if (DateOnly.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _))
+        {
+            return JsonSerializer.Deserialize<ManagedTask>("{\"deadlineAt\":" + JsonSerializer.Serialize(value) + "}", JsonOptions)!.DeadlineAt;
+        }
         // 未指定または不正値はnullとして扱う。
         return DateTimeOffset.TryParse(value, CultureInfo.CurrentCulture, DateTimeStyles.AllowWhiteSpaces, out DateTimeOffset parsedValue)
             ? parsedValue

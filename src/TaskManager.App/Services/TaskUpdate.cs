@@ -40,7 +40,11 @@ public static class TaskUpdate
             }
             try
             {
-                property.SetValue(replacementTask, change.Value.Deserialize(property.PropertyType, Options));
+                // 期限はモデルの専用変換を通し、日付だけの部分更新にも20時を補う。
+                object? replacementValue = property.Name == nameof(ManagedTask.DeadlineAt)
+                    ? JsonSerializer.Deserialize<ManagedTask>("{\"deadlineAt\":" + change.Value.GetRawText() + "}", Options)!.DeadlineAt
+                    : change.Value.Deserialize(property.PropertyType, Options);
+                property.SetValue(replacementTask, replacementValue);
             }
             catch (JsonException exception)
             {

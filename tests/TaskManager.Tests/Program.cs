@@ -20,7 +20,30 @@ namespace TaskManager.Tests;
 /// <summary>外部テストフレームワークなしで受け入れ条件を検証する。</summary>
 public static class Program
 {
-    // 成功件数と失敗件数を保持する。
+    /// <summary>期限入力の既定時刻と明示値の互換性を検証する。</summary>
+    private static Task TestDeadlineInputAsync()
+    {
+        // 新規登録と部分更新で日付補完・明示時刻・省略・解除を検証する。
+        JsonSerializerOptions options = new(JsonSerializerDefaults.Web);
+        ManagedTask task = JsonSerializer.Deserialize<ManagedTask>("{\"title\":\"期限検証\",\"deadlineAt\":\"2026-09-15\"}", options)!;
+        Assert(task.DeadlineAt?.Hour == 20 && task.DeadlineAt?.Day == 15, "日付だけの期限が20時になりません。");
+        foreach (string deadline in new[] { "2026-09-16", "2026-09-16T00:00:00+09:00", "2026-09-16T14:30:00+09:00" })
+        {
+            using JsonDocument changes = JsonDocument.Parse("{\"deadlineAt\":\"" + deadline + "\"}");
+            ManagedTask updated = TaskUpdate.Merge(task, changes.RootElement);
+            ManagedTask created = JsonSerializer.Deserialize<ManagedTask>(changes.RootElement, options)!;
+            int expectedHour = deadline.Length == 10 ? 20 : deadline.Contains("T00:") ? 0 : 14;
+            Assert(updated.DeadlineAt?.Hour == expectedHour && updated.DeadlineAt == created.DeadlineAt, "期限の時刻が保持されません。");
+        }
+        using JsonDocument omitted = JsonDocument.Parse("{\"title\":\"名称変更\"}");
+        using JsonDocument cleared = JsonDocument.Parse("{\"deadlineAt\":null}");
+        Assert(TaskUpdate.Merge(task, omitted.RootElement).DeadlineAt == task.DeadlineAt, "省略した期限が変わりました。");
+        Assert(TaskUpdate.Merge(task, cleared.RootElement).DeadlineAt is null, "期限を解除できません。");
+        Assert(JsonSerializer.Deserialize<ManagedTask>("{}", options)!.DeadlineAt is null, "未指定の期限が追加されました。");
+        return Task.CompletedTask;
+    }
+
+    // 成功件数を保持する。
     private static int passedCount;
     private static int failedCount;
 
@@ -33,6 +56,7 @@ public static class Program
         if (arguments.Contains("--codex-task-smoke")) return await CodexChatTests.LiveAsync(verifyTaskCommand: true);
         await RunTestAsync("Codex会話の重複送信・承認・復旧を管理する", CodexChatTests.VerifyAsync);
         await RunTestAsync("CLIの標準入力・選択JSON・単一取得を検証する", CliJsonTests.VerifyAsync);
+        await RunTestAsync("日付だけの期限は20時とし明示時刻と解除を保持する", TestDeadlineInputAsync);
         await RunTestAsync("Tailscale Serveとローカル接続の信頼境界を守る", RemoteAccessTests.VerifyAsync);
         await RunTestAsync("正式表示名と内部識別子を分離する", TestApplicationDisplayNameAsync);
         await RunTestAsync("画面変更を複数接続へ通知する", TestUiChangeNotifierAsync);

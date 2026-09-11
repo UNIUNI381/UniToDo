@@ -169,3 +169,5 @@ taskctl project prepare "ユーザーが入力した表記" --json
 UniToDo専用会話では同梱CLIを専用PATHから`taskctl`で直接実行します。`--file -`は標準入力のJSONオブジェクトを読み、一時ファイルが不要です。PowerShell 5.1の日本語パイプ入力では`$OutputEncoding=[Text.Encoding]::UTF8`を同じコマンド内で先に設定します。`--json`は字下げなし・日本語非エスケープで出力します。
 
 読取の`--fields identifier,title,projectIdentifier,status`はJSON出力を兼ね、必要項目だけ返します。ネストはドットで区切り、配列・nullの形は維持します。更新と`project prepare/resolve`には使用できません。書込み前後の確認に必要な項目は省略しません。1件の確認には`get TASK-ID`を使います。
+
+期限の日付だけを指定した場合、deadlineAtのYYYY-MM-DD入力はローカル20:00へ補完します。AIも時刻未指定の日付には20:00を補います。明示された0時などの日時は保持します。期限全体の省略は既存のプロジェクト既定規則、更新時の省略は現在値維持、nullは解除です。既存タスクへの一括補正は行いません。

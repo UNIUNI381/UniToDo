@@ -13,6 +13,8 @@ public sealed class ManagedTask
     public string Details { get; set; } = string.Empty;
     public string? ParentIdentifier { get; set; }
     public string Status { get; set; } = TaskConstants.ReadyStatus;
+    // 明示日時または日付入力へ20時を補った期限を保持する。
+    [JsonConverter(typeof(DeadlineJsonConverter))]
     public DateTimeOffset? DeadlineAt { get; set; }
     public string DeadlineType { get; set; } = TaskConstants.NoDeadlineType;
     public string DeadlineOrigin { get; set; } = ProjectConstants.AutomaticDeadlineOrigin;

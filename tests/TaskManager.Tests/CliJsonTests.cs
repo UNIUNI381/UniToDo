@@ -33,6 +33,15 @@ public static class CliJsonTests
             Assert(output.Trim() == "{}", "応答JSONが変わりました。");
         }
 
+        // 日付だけの期限を20時へ補い、明示された0時は変更しない。
+        foreach (string deadline in new[] { "2026-09-12", "2026-09-12T00:00:00+09:00" })
+        {
+            using RecordingHandler handler = new();
+            (int exitCode, _) = await RunAsync(handler, ["add", "--title", "期限検証", "--deadline", deadline, "--json"], "");
+            DateTimeOffset actualDeadline = JsonSerializer.Deserialize<JsonElement>(handler.Body!).GetProperty("deadlineAt").GetDateTimeOffset();
+            Assert(exitCode == 0 && actualDeadline.Day == 12 && actualDeadline.Hour == (deadline.Length == 10 ? 20 : 0), "CLIの期限時刻が不正です。");
+        }
+
         // 空・破損JSONと出力指定の誤りでは、更新リクエストを送らない。
         using (RecordingHandler handler = new())
         {
