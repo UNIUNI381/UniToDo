@@ -324,7 +324,7 @@ public sealed class CodexChatService
                         if (Text(historyTurn, "status") == "inProgress") { status = "running"; turn = Text(historyTurn, "id"); }
                     }
                     if (status == "idle") prompts.Clear();
-                    error = "履歴を再取得しました。結果不明だった依頼の反映状況を確認してください。";
+                    error = null;
                 }
             }
             return Snapshot();

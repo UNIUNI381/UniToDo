@@ -11,6 +11,11 @@
   let messageSignature = "";
   let pendingSubmission = null;
   let pollTimer = null;
+  // 通知の自動非表示予約と、ブラウザで送信結果を確認できなかった状態を保持する。
+  let noticeTimer = null;
+  let submissionUncertain = false;
+  // 履歴照合後に利用者の確認が必要な注意を保持する。
+  let noticeRequiresReview = false;
   // キーボード開閉前の末尾追従状態とViewport更新の予約を保持する。
   let followLatest = true;
   let viewportFrame = null;
@@ -51,9 +56,21 @@
 
   function showError(message) {
     // エラーはHTMLとして解釈せず、パネル内へ表示する。
+    window.clearTimeout(noticeTimer);
+    noticeTimer = null;
+    noticeRequiresReview = false;
     const element = document.getElementById("assistant-error");
     element.textContent = message || "";
     element.classList.toggle("hidden", !message);
+  }
+
+  function dismissNoticeLater() {
+    // 正常復帰後の通知を3秒で閉じ、定期取得では期限を延長しない。
+    if (noticeRequiresReview || noticeTimer !== null || document.getElementById("assistant-error").classList.contains("hidden")) return;
+    noticeTimer = window.setTimeout(() => {
+      // 新しいエラーがない場合にだけ、予約された通知を閉じる。
+      showError("");
+    }, 3000);
   }
 
   function element(tag, text, className = "") {
@@ -177,6 +194,7 @@
   async function operate(path, body) {
     // 通信エラー時にも依頼を勝手に再送しない。
     if (busy) return false;
+    const wasUncertain = submissionUncertain || snapshot?.status === "uncertain";
     busy = true;
     showError("");
     if (snapshot) render(snapshot);
@@ -185,8 +203,18 @@
       const state = await apiRequest(`/api/v1/assistant${path}`, { method: "POST", body: JSON.stringify(body) });
       render(state);
       showError(state.error);
+      if (path === "/reconnect" && !state.error && ["idle", "running"].includes(state.status)) {
+        // 結果不明だった依頼の照合時だけ注意を添え、通常更新は短い通知にする。
+        showError("履歴を更新しました" + (wasUncertain ? "。結果不明だった依頼の反映状況を確認してください。" : ""));
+        submissionUncertain = false;
+        noticeRequiresReview = wasUncertain;
+        if (!wasUncertain) dismissNoticeLater();
+      }
+      if (path === "/messages" && state.status !== "uncertain") submissionUncertain = false;
       return true;
     } catch (error) {
+      // 応答を受け取れなかった送信は、次の履歴取得まで結果不明として扱う。
+      if (path === "/messages") submissionUncertain = true;
       showError(error.message + (path === "/messages" ? " 自動再送はしません。履歴を確認してください。" : ""));
       return false;
     } finally {
@@ -206,6 +234,7 @@
         const state = await apiRequest("/api/v1/assistant/state");
         render(state);
         if (state.error) showError(state.error);
+        else if (state.status === "idle" && !submissionUncertain) dismissNoticeLater();
       }
     } catch (error) {
       showError(error.message);
