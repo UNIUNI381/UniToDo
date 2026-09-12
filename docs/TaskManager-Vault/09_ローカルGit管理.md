@@ -34,11 +34,10 @@ Vaultでは`.obsidian/app.json`と`.obsidian/.gitignore`を追跡します。リ
 
 ## ステージとコミット
 
-1. 変更前に`git status --short --ignored`で未追跡物と除外物を確認する。
-2. 初回登録では管理対象のルートとファイルを明示して`git add`する。ワークスペース全体を無検査で登録しない。
-3. `git diff --cached --name-status`と`git diff --cached --stat`でステージ済み一覧を確認する。
-4. DB、バックアップ、資格情報、トークン、個人設定、生成物、大容量バイナリがないことをファイル名と内容の両面で検査する。
-5. `scripts/test.ps1`を実行し、実装とVaultが一致した状態で変更単位ごとにコミットする。
+1. `git status --short` と差分で自分の変更を特定する。新しい追跡対象や除外設定を扱う場合は `--ignored` も確認する。
+2. 対象ファイルを明示して `git add -- <対象>` する。既存のユーザー変更と分離できないファイルはステージしない。
+3. `git diff --check`、`git diff --cached --check`、ステージ済み一覧・内容を確認する。上記の除外対象や秘密情報を含まず、必要ファイルの追跡漏れがないことを確かめる。
+4. [開発Skill](../../.agents/skills/update-task-manager-system/SKILL.md)の検証を通した実装・テスト・文書を同じ変更単位でローカルコミットし、最後に `git status --short` を確認する。
 
 ## GitHubへの公開
 
@@ -53,12 +52,3 @@ Vaultでは`.obsidian/app.json`と`.obsidian/.gitignore`を追跡します。リ
 ## 頒布との境界
 
 `.gitignore`はGitへの登録を防ぐだけで、手動ZIPへの混入は防ぎません。頒布には必ず`scripts/create-distribution.ps1`のallowlist方式と個人データ検査を使用し、`.git/`とローカル履歴を含めません。詳細は[頒布と受取人セットアップ](08_頒布と受取人セットアップ.md)を参照します。
-
-## 受入基準
-
-- 追跡一覧にDB、バックアップ、資格情報、トークン、個人設定、生成物がない。
-- ソース、テスト、スクリプト、Skill、設計資料、再現に必要な設定が追跡されている。
-- 変更後に`git status`で意図しない未追跡ファイルが残らない。
-- クリーンなチェックアウトから.NET 10環境で`scripts/test.ps1`を実行できる。
-- 公開する全履歴のauthor・committerに個人メールアドレスがなく、以後のコミットへ`noreply`メールアドレスが使用される。
-- GitHubへは確認した公開ブランチとタグだけを送信し、Codex内部参照や除外対象を公開しない。

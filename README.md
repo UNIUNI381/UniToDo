@@ -51,9 +51,10 @@ dotnet --list-sdks
 発行とインストールにはPowerShell 7を使用します。Windows PowerShell 5.1の`powershell`ではなく、次のように`pwsh`を明示して実行してください。
 
 ```powershell
-pwsh -NoProfile -File .\scripts\publish.ps1
 pwsh -NoProfile -File .\scripts\install.ps1
 ```
+
+`install.ps1`は内部で発行します。発行だけなら`publish.ps1`、検証済み発行物の導入だけなら`install.ps1 -SkipPublish`を使います。
 
 インストール先は`%LOCALAPPDATA%\Programs\TaskManager`、データ保存先は`%LOCALAPPDATA%\TaskManager`です。デスクトップには`UniToDo`ショートカット、ログオン時の自動起動にはWindowsタスク`UniToDo Watchdog`が設定され、`http://127.0.0.1:48120`だけで待ち受けます。
 
@@ -65,15 +66,7 @@ Androidから利用する場合は、[スマートフォンアクセス](docs/Ta
 
 ソースコードはGitHubの公開リポジトリで提供し、利用者向けの自己完結型`win-x64`頒布物はGitHub Releasesで提供します。利用者は各Releaseに添付された`UniToDo-win-x64.zip`をダウンロードしてください。GitHubが自動生成する`Source code (zip)`と`Source code (tar.gz)`には発行済みランタイムが含まれないため、インストール用頒布物として使用しません。
 
-Releaseへ添付するZIPは、利用・改良に必要なソース、自己完結ランタイム、Codex Skillをまとめ、個人データを検査して作成します。
-
-```powershell
-pwsh -NoProfile -File .\scripts\create-distribution.ps1
-```
-
-PowerShell 7が必要です。生成物は`artifacts/distribution`配下です。ワークスペースを手動でZIP化せず、必ずこのスクリプトを使用します。DB、バックアップ、資格情報、OAuthトークン、実タスク、作成者固有のCodexタスクIDは含まれません。発行済み依存関係と`licenses/dependencies.json`が一致しない場合や、必要なライセンス原文が欠けている場合はZIPを生成しません。生成したZIPだけをGitHub Releaseの資産として添付します。
-
-受取人は`UniToDo-win-x64.zip`を解凍して任意の場所へ配置し、Codexで「新しいチャット」→「新しいプロジェクト」を選択します。プロジェクト名を設定し、「ソースフォルダ」から解凍した`UniToDo-win-x64`フォルダーを選択してプロジェクトを作成した後、`最初にお読みください.txt`のプロンプトをCodexへ入力します。Codexが`AGENTS.md`と設計Vaultを読み、環境確認、`Install.ps1`、タスク操作、開発準備を案内します。詳細は[頒布と受取人セットアップ](docs/TaskManager-Vault/08_頒布と受取人セットアップ.md)を参照してください。
+頒布ZIPの生成は明示的に必要な場合だけ行います。生成コマンド、検査、公開、受取人の導入手順は[頒布と受取人セットアップ](docs/TaskManager-Vault/08_頒布と受取人セットアップ.md)にまとめています。受取人はZIPを解凍し、`最初にお読みください.txt`から開始してください。
 
 ## 音声入力連携
 
@@ -91,7 +84,7 @@ TypeWhisperを終了し、最初に`-WhatIf`で変更対象を確認してから
 .\scripts\install-typewhisper-integration.ps1
 ```
 
-利用者はF13で録音を開始・停止し、校正本文を確認・編集して送信できます。UniToDoはTypeWhisperのループバックAPIで「音声校正」ワークフローを直接開始・停止します。API起動と選択モデルのダウンロード済み状態を確認した後、録音開始API内で認識モデルを遅延ロードし、実際の録音開始を確認してから表示を進めます。F14開始とF15停止は手動操作用の予備経路として残します。Ollamaの起動とモデルロードは録音と並行し、録音停止後は対象モデルのロード完了を確認してから本文をOllamaへ渡します。音声はWebと共通のCodex App Server経路・会話・権限を使用します。追加の質問への回答や停止はWeb画面で操作します。構成、データ保護、CLI送信、テスト、障害対応は[音声入力設計](docs/TaskManager-Vault/07_音声入力.md)を参照してください。
+F13で録音を開始・停止し、校正本文を確認・編集してWebと共通のCodex会話へ送信します。OllamaとTypeWhisperは必要時に起動します。追加質問への回答や停止はWeb画面で行います。構成・設定・障害対応は[音声入力](docs/TaskManager-Vault/07_音声入力.md)を参照してください。
 
 ## 初回設定
 
@@ -107,24 +100,10 @@ TypeWhisperを終了し、最初に`-WhatIf`で変更対象を確認してから
 ```powershell
 taskctl now --json
 taskctl list --status 実行可能 --json
-taskctl add --title "見積書を送付" --minutes 30 --importance 4
-taskctl start TASK-ID
-taskctl complete TASK-ID
-taskctl postpone TASK-ID --minutes 60
-taskctl cancel TASK-ID
-taskctl project prepare "サンプル案件" --json
-taskctl draft-create --file draft.json --idempotency-key REQUEST-KEY --json
-taskctl draft list --project PROJECT-ID --json
-taskctl draft get BATCH-ID --json
-taskctl time active --json
-taskctl time start --title "資料調査" --project PROJECT-ID
-taskctl time stop TIME-ID
-taskctl time report --period week --json
+taskctl get TASK-ID --json
 ```
 
-作業ログの手入力・更新では、既存区間と重複すると保存前にエラーになります。内容を確認して両方を集計する場合だけ`--allow-overlap`を指定します。
-
-開発ツリーからは`.\scripts\task.ps1 now --json`のように実行できます。`draft-create --help`、`project prepare --help`、`add --help`でJSON出力と終了コードを確認できます。JSONによる登録・更新・下書き分解は[AI操作ガイド](docs/AI_OPERATIONS.md)を参照してください。
+Codexからの登録・更新・下書き・作業時間の操作は[AI操作ガイド](docs/AI_OPERATIONS.md)を参照してください。開発ツリーからの手動実行には `./scripts/task.ps1 <command>` を使えます。
 
 ## バックアップ
 
