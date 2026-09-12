@@ -2292,7 +2292,7 @@ function attachHorizontalDragScrolling(scrollContainer) {
     startingScrollPosition = scrollContainer.scrollLeft;
     hasDragged = false;
     // 押しただけでは捕捉せず、子ボタンへ通常のクリックを届ける。
-    showHorizontalScrollbarTemporarily(scrollContainer);
+    if (scrollContainer.id !== "navigation") showHorizontalScrollbarTemporarily(scrollContainer);
   });
   scrollContainer.addEventListener("pointermove", function moveHorizontalDrag(event) {
     if (activePointerIdentifier !== event.pointerId) return;
@@ -2313,7 +2313,8 @@ function attachHorizontalDragScrolling(scrollContainer) {
     activePointerIdentifier = null;
     scrollContainer.classList.remove("dragging");
     suppressesNextClick = hasDragged;
-    showHorizontalScrollbarTemporarily(scrollContainer);
+    // ナビゲーションは実際に横位置が変化した操作だけ表示時間を延長する。
+    if (scrollContainer.id !== "navigation" || (hasDragged && scrollContainer.classList.contains("scrollbar-active"))) showHorizontalScrollbarTemporarily(scrollContainer);
     window.setTimeout(function clearClickSuppression() {
       // 背景上でドラッグした場合も次の通常クリックへ抑止状態を残さない。
       suppressesNextClick = false;
@@ -2330,7 +2331,7 @@ function attachHorizontalDragScrolling(scrollContainer) {
   }, true);
   scrollContainer.addEventListener("wheel", function showScrollbarForWheel() {
     // ホイールやShift+ホイール操作中も現在位置を確認できるようにする。
-    showHorizontalScrollbarTemporarily(scrollContainer);
+    if (scrollContainer.id !== "navigation") showHorizontalScrollbarTemporarily(scrollContainer);
   }, { passive: true });
   scrollContainer.addEventListener("scroll", function showScrollbarForScroll() {
     // 初期位置調整を除く実操作時だけスクロールバーを短時間表示する。

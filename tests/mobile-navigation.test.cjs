@@ -1,6 +1,65 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { mobileSwipeDirection, initializeMobileNavigation } = require("../src/TaskManager.App/wwwroot/mobile-navigation.js");
+const filesystem = require("node:fs");
+const virtualMachine = require("node:vm");
+
+test("初回タップではバーを出さず、横移動後は自動的に隠す", () => {
+  // 本体のイベント処理を読み込み、タップからスクロールまで同じ領域で検証する。
+  const source = filesystem.readFileSync(require.resolve("../src/TaskManager.App/wwwroot/app.js"), "utf8");
+  const excerpt = source.slice(source.indexOf("function attachHorizontalDragScrolling("), source.indexOf("function scheduleDependencyGraphDrawing("));
+  const callbacks = {};
+  const timers = new Map();
+  const classes = new Set();
+  let timerSequence = 0;
+  let captured = false;
+  const context = virtualMachine.createContext({
+    horizontalScrollbarHideTimers: new WeakMap(),
+    window: {
+      setTimeout(callback) {
+        // 実時間を待たずタイマー発火を再現する。
+        timers.set(++timerSequence, callback);
+        return timerSequence;
+      },
+      clearTimeout(identifier) {
+        // 再スクロール時の期限延長を再現する。
+        timers.delete(identifier);
+      }
+    }
+  });
+  virtualMachine.runInContext(excerpt, context);
+  const navigation = {
+    id: "navigation", dataset: {}, scrollLeft: 0,
+    classList: { add: value => classes.add(value), remove: value => classes.delete(value), contains: value => classes.has(value) },
+    addEventListener: (name, callback) => { callbacks[name] = callback; },
+    setPointerCapture: () => { captured = true; }, hasPointerCapture: () => captured,
+    releasePointerCapture: () => { captured = false; }
+  };
+  const pressed = { button: 0, pointerId: 1, clientX: 100, target: { closest: () => false }, preventDefault() {} };
+  context.attachHorizontalDragScrolling(navigation);
+  callbacks.pointerdown(pressed);
+  assert.equal(captured, false);
+  callbacks.pointerup(pressed);
+  callbacks.wheel();
+  assert.equal(classes.has("scrollbar-active"), false);
+  navigation.scrollLeft = 40;
+  callbacks.scroll();
+  assert.equal(classes.has("scrollbar-active"), true);
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(classes.has("scrollbar-active"), false);
+  timers.clear();
+  callbacks.pointerdown(pressed);
+  callbacks.pointermove({ ...pressed, clientX: 50 });
+  assert.equal(captured, true);
+  callbacks.scroll();
+  callbacks.pointerup(pressed);
+  assert.equal(classes.has("scrollbar-active"), true);
+  for (const callback of [...timers.values()]) callback();
+  assert.equal(classes.has("scrollbar-active"), false);
+  callbacks.pointerdown(pressed);
+  callbacks.pointerup(pressed);
+  assert.equal(classes.has("scrollbar-active"), false);
+});
 
 test("スワイプ距離と横方向優勢の境界", () => {
   // 誤タップ、縦移動、閾値ちょうどの方向を確認する。

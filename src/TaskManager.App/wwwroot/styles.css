@@ -28,7 +28,12 @@ button { cursor: pointer; }
 .brand strong { display: block; }
 nav { display: grid; gap: 6px; }
 .nav-button { border: 0; border-radius: 10px; padding: 12px 14px; text-align: left; background: transparent; color: #b9c9c0; }
-.nav-button:hover, .nav-button.active { background: rgba(255,255,255,.1); color: #fff; }
+.nav-button.active { background: rgba(255,255,255,.1); color: #fff; }
+/* タッチ後に残るhover状態を選択中の表示と混同させない。 */
+@media (hover: hover) and (pointer: fine) {
+  .nav-button:hover { background: rgba(255,255,255,.1); color: #fff; }
+}
+.nav-button:focus-visible { outline: 2px solid #91a69a; outline-offset: -2px; }
 .sidebar-footer { margin-top: auto; padding: 12px; display: flex; align-items: center; gap: 8px; color: #aebdb5; font-size: 13px; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #5fd68d; box-shadow: 0 0 0 4px rgba(95,214,141,.12); }
 .main-content { width: min(1180px, 100%); min-width: 0; padding: 46px 56px 80px; }
@@ -365,9 +370,9 @@ dialog::backdrop { background: rgba(12,25,18,.52); backdrop-filter: blur(3px); }
   nav::-webkit-scrollbar { height: 7px; }
   nav::-webkit-scrollbar-track { background: transparent; }
   nav::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: transparent; }
-  nav.scrollbar-active, nav:focus-within { scrollbar-color: #91a69a #e8eeea; }
-  nav.scrollbar-active::-webkit-scrollbar-track, nav:focus-within::-webkit-scrollbar-track { border-radius: 999px; background: #e8eeea; }
-  nav.scrollbar-active::-webkit-scrollbar-thumb, nav:focus-within::-webkit-scrollbar-thumb { border-color: #e8eeea; background: #91a69a; }
+  nav.scrollbar-active { scrollbar-color: #91a69a #e8eeea; }
+  nav.scrollbar-active::-webkit-scrollbar-track { border-radius: 999px; background: #e8eeea; }
+  nav.scrollbar-active::-webkit-scrollbar-thumb { border-color: #e8eeea; background: #91a69a; }
   .nav-button { white-space: nowrap; }
   .sidebar-footer { display: none; }
   .main-content { padding: 28px 18px 60px; }
