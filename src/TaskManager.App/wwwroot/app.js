@@ -2450,6 +2450,7 @@ function initializeTaskDialog() {
   document.getElementById("close-task-dialog").addEventListener("click", closeTaskDialog);
   document.getElementById("cancel-task-dialog").addEventListener("click", closeTaskDialog);
   document.getElementById("task-form").addEventListener("submit", saveTaskFromDialog);
+  document.querySelector("#task-form [name='status']").addEventListener("change", updateTaskDialogStartButton);
   document.querySelector("#task-form [name='deadlineAt']").addEventListener("change", function handleDeadlineChange(event) {
     // 日時を入力した場合は個別指定へ明示的に切り替える。
     if (event.target.value) {
@@ -2500,7 +2501,17 @@ function openTaskDialog(taskIdentifier = null) {
     form.elements.namedItem("requiredContext").value = "PC";
     form.elements.namedItem("splittable").checked = true;
   }
+  updateTaskDialogStartButton();
   dialog.showModal();
+}
+
+/** 編集対象の状態に合わせて開始ボタンを更新する。 */
+function updateTaskDialogStartButton() {
+  // 保存後に開始できる既存タスクだけで操作を有効にする。
+  const form = document.getElementById("task-form");
+  const startButton = document.getElementById("start-task-dialog");
+  startButton.hidden = !form.elements.namedItem("identifier").value;
+  startButton.disabled = form.elements.namedItem("status").value !== "実行可能";
 }
 
 /** タスク編集ダイアログを閉じる。 */
@@ -2514,7 +2525,10 @@ async function saveTaskFromDialog(event) {
   // 画面入力をAPIの型へ変換する。
   event.preventDefault();
   const form = event.currentTarget;
+  if (form.dataset.saving === "true") return;
+  const startsTask = event.submitter?.id === "start-task-dialog";
   const existingIdentifier = form.elements.namedItem("identifier").value;
+  if (startsTask && (!existingIdentifier || form.elements.namedItem("status").value !== "実行可能")) return;
   const selectedDeadlineOrigin = form.elements.namedItem("deadlineOrigin").value;
   const enteredDeadlineAt = fromLocalInput(form.elements.namedItem("deadlineAt").value);
   const deadlineAt = selectedDeadlineOrigin === "none" ? null : enteredDeadlineAt;
@@ -2548,6 +2562,7 @@ async function saveTaskFromDialog(event) {
     source: "画面"
   };
   try {
+    form.dataset.saving = "true";
     await apiRequest(existingIdentifier ? `/api/v1/tasks/${encodeURIComponent(existingIdentifier)}` : "/api/v1/tasks", {
       method: existingIdentifier ? "PUT" : "POST",
       body: JSON.stringify(task)
@@ -2555,8 +2570,12 @@ async function saveTaskFromDialog(event) {
     closeTaskDialog();
     showNotice(existingIdentifier ? "タスクを更新しました。" : "タスクを追加しました。");
     await Promise.all([loadTasks(), loadDashboard()]);
+    // 保存成功後だけ共通の活動切替確認を経由して開始する。
+    if (startsTask) await executeTaskAction(existingIdentifier, "start");
   } catch (error) {
     showNotice(error.message, true);
+  } finally {
+    form.dataset.saving = "false";
   }
 }
 

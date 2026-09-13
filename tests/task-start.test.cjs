@@ -5,6 +5,39 @@ const virtualMachine = require("node:vm");
 const source = filesystem.readFileSync(require("node:path").join(__dirname, "../src/TaskManager.App/wwwroot/app.js"), "utf8");
 const functions = source.slice(source.indexOf("async function executeTaskAction("), source.indexOf("/** 全タスクを取得して一覧と下書きを更新する。 */"));
 
+test("編集画面は保存成功後だけ開始し、保存失敗と二重送信では開始を増やさない", async () => {
+  // 実際の保存処理で保存・開始の順序と失敗経路を確認する。
+  for (const failure of [false, true]) {
+    const operations = [];
+    const values = { identifier: "edited", status: "実行可能", deadlineOrigin: "none" };
+    const form = { dataset: {}, elements: { namedItem(name) {
+      // 未指定項目には空のフォーム値を返す。
+      return { value: values[name] || "", checked: false };
+    } } };
+    const context = virtualMachine.createContext({
+      fromLocalInput() { /* 期限なしを再現する。 */ return null; },
+      async apiRequest() {
+        // 保存失敗では開始処理へ進めないことを確認する。
+        operations.push("save");
+        if (failure) throw new Error("保存失敗");
+      },
+      closeTaskDialog() { /* ダイアログを閉じる順序を記録する。 */ operations.push("close"); },
+      showNotice() { /* 通知を代替する。 */ },
+      async loadTasks() { /* 一覧取得を代替する。 */ },
+      async loadDashboard() { /* ダッシュボード取得を代替する。 */ },
+      async executeTaskAction(identifier, action) {
+        // 保存対象と開始対象が一致することを確認する。
+        operations.push(`${identifier}:${action}`);
+      }
+    });
+    virtualMachine.runInContext(source.slice(source.indexOf("async function saveTaskFromDialog("), source.indexOf("/** プロジェクト管理ダイアログと関連操作を初期化する。 */")), context);
+    const event = { currentTarget: form, submitter: { id: "start-task-dialog" }, preventDefault() { /* 送信を代替する。 */ } };
+    await Promise.all([context.saveTaskFromDialog(event), context.saveTaskFromDialog(event)]);
+    assert.deepEqual(operations, failure ? ["save"] : ["save", "close", "edited:start"]);
+    assert.equal(form.dataset.saving, "false");
+  }
+});
+
 function createScenario(activeEntry, selection, changedEntry = activeEntry, failure = false) {
   // APIと選択画面を差し替え、実際の開始処理の呼出順を記録する。
   const requests = [];
