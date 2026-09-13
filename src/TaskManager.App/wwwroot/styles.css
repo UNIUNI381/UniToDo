@@ -139,6 +139,8 @@ nav { display: grid; gap: 6px; }
 .calendar-deadline-labels { position: absolute; top: 0; left: 6px; display: grid; width: max-content; gap: 6px; }
 .calendar-deadline-label { display: flex; width: max-content; max-width: 190px; height: 24px; align-items: center; overflow: hidden; padding: 3px 7px; border: 1px solid #e6bbb6; border-left: 4px solid var(--project-color); border-radius: 6px; background: #fff2f0; color: #6d302c; box-shadow: 0 3px 8px rgba(80,39,35,.08); white-space: nowrap; }
 .calendar-deadline-label span { overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
+.calendar-deadline-label:hover { text-decoration: underline; }
+.calendar-deadline-label:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .calendar-deadline-marker.target { border-left-style: dashed; border-left-color: #b47a28; }
 .calendar-deadline-marker.target::before { background: #b47a28; box-shadow: 0 0 0 1px #b47a28; }
 .calendar-deadline-marker.target .calendar-deadline-label { border-color: #ead2a8; border-left-color: var(--project-color); background: #fff8e9; color: #75531e; }

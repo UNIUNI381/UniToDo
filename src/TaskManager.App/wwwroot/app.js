@@ -691,6 +691,12 @@ function renderCalendarTimeline(calendarWidget) {
     </div>`;
   const scrollContainer = timelineContainer.querySelector(".calendar-timeline-scroll");
   attachHorizontalDragScrolling(scrollContainer);
+  for (const deadlineButton of timelineContainer.querySelectorAll("[data-deadline-task]")) {
+    deadlineButton.addEventListener("click", function handleDeadlineClick() {
+      // 締め切りに対応するタスクを共通の編集画面で開く。
+      openTaskDialog(deadlineButton.dataset.deadlineTask);
+    });
+  }
   for (const timeEntryBlock of timelineContainer.querySelectorAll("[data-time-entry]")) {
     timeEntryBlock.addEventListener("click", function handleTimeEntryBlockClick() {
       // 完了済みは全項目、実行中は開始時刻だけを編集できる共通画面を開く。
@@ -827,7 +833,7 @@ function renderCalendarDayRow(dayStart, dayEnd, calendarEvents, taskDeadlines, t
       // ラベル本文は名称だけとし、詳細はタスクごとのツールチップへ保持する。
       const projectColor = getProjectColor(taskDeadline.projectIdentifier);
       const tooltipText = buildTaskDeadlineTooltip(taskDeadline);
-      return `<span class="calendar-deadline-label" style="--project-color:${projectColor}" title="${escapeAttribute(tooltipText)}"><span>${escapeHtml(taskDeadline.title)}</span></span>`;
+      return `<button type="button" class="calendar-deadline-label" data-deadline-task="${escapeAttribute(taskDeadline.taskIdentifier)}" style="--project-color:${projectColor}" title="${escapeAttribute(tooltipText)}" aria-label="${escapeAttribute(`${taskDeadline.title}を編集`)}"><span>${escapeHtml(taskDeadline.title)}</span></button>`;
     }).join("");
     return `<div class="calendar-deadline-marker${deadlineClass}${alignmentClass}" style="left:${markerPosition}px;top:${markerTop}px;height:${markerHeight}px">
       <span class="calendar-deadline-labels">${deadlineLabelsMarkup}</span>
@@ -2285,8 +2291,8 @@ function attachHorizontalDragScrolling(scrollContainer) {
   let suppressesNextClick = false;
   scrollContainer.addEventListener("pointerdown", function beginHorizontalDrag(event) {
     if (event.button !== 0) return;
-    // 編集ボタンと作業ログカードの押下では横スクロールを開始せず、通常のクリックを優先する。
-    if (event.target.closest("[data-dependency-task-edit], [data-time-entry]")) return;
+    // 編集ボタン・締め切り・作業ログの押下では横スクロールを開始せず、通常のクリックを優先する。
+    if (event.target.closest("[data-dependency-task-edit], [data-deadline-task], [data-time-entry]")) return;
     activePointerIdentifier = event.pointerId;
     startingHorizontalPosition = event.clientX;
     startingScrollPosition = scrollContainer.scrollLeft;
