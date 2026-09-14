@@ -16,6 +16,8 @@ public sealed class AutomationWorker(
     private readonly TaskManagerTray tray = taskManagerTray;
     private readonly UiChangeNotifier changeNotifier = uiChangeNotifier;
     private readonly ILogger<AutomationWorker> applicationLogger = logger;
+    // 操作履歴の保持期限を最後に確認したローカル日付を保持する。
+    private DateOnly? lastHistoryCleanupDate;
     private DateTimeOffset lastCalendarAttempt = DateTimeOffset.MinValue;
 
     /// <summary>1分周期の自動処理ループを開始する。</summary>
@@ -49,6 +51,14 @@ public sealed class AutomationWorker(
         TaskManagerSettings settings = await repository.GetSettingsAsync(cancellationToken);
         DateTimeOffset currentTime = DateTimeOffset.Now;
         bool userInterfaceChanged = false;
+
+        // 起動時と日付変更後に履歴を整理し、失敗時は次の周期で再試行する。
+        DateOnly currentDate = DateOnly.FromDateTime(currentTime.Date);
+        if (lastHistoryCleanupDate != currentDate)
+        {
+            userInterfaceChanged = await databaseInitializer.PruneHistoryAsync(currentTime, cancellationToken) > 0;
+            lastHistoryCleanupDate = currentDate;
+        }
 
         if (calendarService.IsBackgroundSynchronizationReady()
             && currentTime - lastCalendarAttempt >= TimeSpan.FromMinutes(5))

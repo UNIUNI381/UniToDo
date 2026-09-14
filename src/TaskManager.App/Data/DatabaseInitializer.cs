@@ -222,6 +222,30 @@ public sealed class DatabaseInitializer(TaskManagerPaths taskManagerPaths)
         await versionCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    /// <summary>90日より古い操作履歴をバックアップ後に削除する。</summary>
+    public async Task<int> PruneHistoryAsync(DateTimeOffset currentTime, CancellationToken cancellationToken = default)
+    {
+        // 90日前の同時刻を境界とし、異なるUTCオフセットも絶対時刻で判定する。
+        string cutoffTime = currentTime.AddDays(-90).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+        await using SqliteConnection connection = OpenConnection();
+        await using (SqliteCommand countCommand = connection.CreateCommand())
+        {
+            countCommand.CommandText = "SELECT COUNT(*) FROM history WHERE julianday(occurred_at) < julianday($cutoffTime);";
+            countCommand.Parameters.AddWithValue("$cutoffTime", cutoffTime);
+            if (Convert.ToInt64(await countCommand.ExecuteScalarAsync(cancellationToken)) == 0)
+            {
+                return 0;
+            }
+        }
+
+        // 退避に成功した場合だけ削除し、解放ページは以降の書き込みで再利用する。
+        await CreateBackupAsync("history-retention", cancellationToken);
+        await using SqliteCommand deleteCommand = connection.CreateCommand();
+        deleteCommand.CommandText = "DELETE FROM history WHERE julianday(occurred_at) < julianday($cutoffTime);";
+        deleteCommand.Parameters.AddWithValue("$cutoffTime", cutoffTime);
+        return await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     /// <summary>SQLiteのオンラインバックアップを作成して古い世代を整理する。</summary>
     public async Task<string> CreateBackupAsync(string reason, CancellationToken cancellationToken = default)
     {

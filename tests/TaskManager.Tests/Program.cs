@@ -85,6 +85,7 @@ public static class Program
         await RunTestAsync("同期エラー時もカレンダーキャッシュを表示する", TestCalendarCacheOnErrorAsync);
         await RunTestAsync("カレンダー履歴は変更時だけ保存する", TestCalendarHistoryChangesAsync);
         await RunTestAsync("旧同期ログの移行とバックアップを検証する", TestCalendarHistoryMigrationAsync);
+        await RunTestAsync("操作履歴の90日境界と退避失敗時の保持を検証する", TestHistoryRetentionAsync);
         await RunTestAsync("CodexタスクIDとディープリンクを正規化する", TestCodexThreadIdentifierAsync);
         await RunTestAsync("CodexタスクをURLプロトコルだけで開く", TestCodexDeepLinkLaunchAsync);
         await RunTestAsync("Codex送信先設定をSQLiteで保持する", TestCodexSettingsRoundTripAsync);
@@ -1016,6 +1017,71 @@ public static class Program
         }
         await database.Initializer.InitializeAsync();
         Assert((await database.Repository.GetHistoryAsync(100)).Count == 3, "再初期化で履歴が変化しました。");
+    }
+
+    /// <summary>90日の境界、再実行、バックアップ失敗時のデータ保持を検証する。</summary>
+    private static async Task TestHistoryRetentionAsync()
+    {
+        // オフセット表記が異なる境界前後の履歴と削除対象外のタスクを保存する。
+        await using TestDatabase database = await TestDatabase.CreateAsync();
+        DateTimeOffset currentTime = StandardTime();
+        DateTimeOffset cutoffTime = currentTime.AddDays(-90);
+        ManagedTask preservedTask = CreateTask("retention-task", "保持するタスク");
+        await database.Repository.SaveTaskAsync(preservedTask, "テスト", TaskConstants.SystemSource);
+        await using (Microsoft.Data.Sqlite.SqliteConnection connection = database.Initializer.OpenConnection())
+        {
+            foreach (DateTimeOffset occurredAt in new[]
+                { cutoffTime.AddSeconds(-1), cutoffTime.ToOffset(TimeSpan.FromHours(-7)), cutoffTime.AddSeconds(1) })
+            {
+                await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+                command.CommandText = """
+                    INSERT INTO history(occurred_at, event_type, summary, source)
+                    VALUES ($occurredAt, '更新', '保持期限テスト', 'システム');
+                    """;
+                command.Parameters.AddWithValue("$occurredAt", occurredAt.ToString("O"));
+                await command.ExecuteNonQueryAsync();
+            }
+        }
+        int originalCount = (await database.Repository.GetHistoryAsync(100)).Count;
+        Assert(await database.Initializer.PruneHistoryAsync(currentTime) == 1, "90日境界の判定が不正です。");
+        Assert((await database.Repository.GetHistoryAsync(100)).Count == originalCount - 1, "境界以降の履歴が失われました。");
+        Assert(await database.Repository.GetTaskAsync(preservedTask.Identifier) is not null, "タスク本体が削除されました。");
+        string backupPath = Directory.GetFiles(database.Paths.BackupDirectory, "*history-retention.db").Single();
+        await using (Microsoft.Data.Sqlite.SqliteConnection backup = new($"Data Source={backupPath};Mode=ReadOnly"))
+        {
+            await backup.OpenAsync();
+            await using Microsoft.Data.Sqlite.SqliteCommand command = backup.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM history;";
+            Assert(Convert.ToInt64(await command.ExecuteScalarAsync()) == originalCount, "削除前の履歴を退避できませんでした。");
+        }
+        Assert(await database.Initializer.PruneHistoryAsync(currentTime) == 0, "再実行で履歴が削除されました。");
+        Assert(Directory.GetFiles(database.Paths.BackupDirectory, "*history-retention.db").Length == 1,
+            "対象のない再実行でバックアップが増えました。");
+
+        // バックアップ先を利用不能にして、退避失敗前に履歴を削除しないことを確認する。
+        await using TestDatabase failureDatabase = await TestDatabase.CreateAsync();
+        await using (Microsoft.Data.Sqlite.SqliteConnection connection = failureDatabase.Initializer.OpenConnection())
+        {
+            await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO history(occurred_at, event_type, source) VALUES ('2000-01-01', '更新', 'システム');
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+        Directory.Delete(failureDatabase.Paths.BackupDirectory);
+        await File.WriteAllTextAsync(failureDatabase.Paths.BackupDirectory, "バックアップ先を遮断");
+        bool backupFailed = false;
+        try
+        {
+            await failureDatabase.Initializer.PruneHistoryAsync(currentTime);
+        }
+        catch (IOException)
+        {
+            backupFailed = true;
+        }
+        Assert(backupFailed, "バックアップ失敗を検出できませんでした。");
+        Assert((await failureDatabase.Repository.GetHistoryAsync(100)).Count == 1,
+            "バックアップ失敗時に履歴が削除されました。");
     }
 
     /// <summary>CodexタスクIDとディープリンクの正規化を検証する。</summary>
