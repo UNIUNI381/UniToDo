@@ -3528,8 +3528,11 @@ async function loadExternalBackupStatus() {
     const status = await apiRequest("/api/v1/backup/status");
     const hourly = status.lastHourlyAt ? new Date(status.lastHourlyAt).toLocaleString("ja-JP") : "未保存";
     const daily = status.lastDailyAt ? new Date(status.lastDailyAt).toLocaleString("ja-JP") : "未保存";
+    const checked = status.lastCheckedAt ? new Date(status.lastCheckedAt).toLocaleString("ja-JP") : "未確認";
+    const results = [status.hourlyResult === "unchanged" ? "時間別：変更なしのため保存をスキップ" : "",
+      status.dailyResult === "unchanged" ? "日別：変更なしのため保存をスキップ" : ""].filter(Boolean).join(" ／ ");
     statusElement.textContent = !status.enabled ? "OFF：追加バックアップは停止しています。"
-      : `時間別の最終保存：${hourly} ／ 日別の最終保存：${daily}。${status.error ? `失敗：${status.error} 次の周期で再試行します。` : status.lastCheckedAt ? "保存先を確認済みです。" : "次の自動実行を待っています（通常1分以内）。"}`;
+      : `最終確認：${checked}。時間別の最終保存：${hourly} ／ 日別の最終保存：${daily}。${status.error ? `失敗：${status.error} 次の周期で再試行します。` : results || (status.lastCheckedAt ? "確認済みです。" : "次の確認周期を待っています。「今すぐバックアップ」で確認できます。")}`;
     document.getElementById("run-external-backup").disabled = !status.enabled;
   } catch (error) {
     statusElement.textContent = `状態の取得に失敗しました：${error.message}`;
@@ -3547,7 +3550,8 @@ async function runExternalBackup() {
   button.disabled = true;
   try {
     const status = await apiRequest("/api/v1/backup/external", { method: "POST" });
-    showNotice(status.error || (status.enabled ? "バックアップを保存しました。" : "追加バックアップはOFFです。"), Boolean(status.error));
+    const unchanged = status.hourlyResult === "unchanged" && Date.parse(status.lastDailyAt) !== Date.parse(status.lastCheckedAt);
+    showNotice(status.error || (status.enabled ? unchanged ? "変更がないため、保存をスキップしました。" : "バックアップを保存しました。" : "追加バックアップはOFFです。"), Boolean(status.error));
   } catch (error) {
     showNotice(error.message, true);
   } finally {

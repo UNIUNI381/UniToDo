@@ -64,25 +64,65 @@ public static class ExternalBackupTests
             backup = new(repository, initializer, paths, NullLogger<ExternalBackupService>.Instance);
             await Task.WhenAll(backup.RunAsync(currentTime.AddMinutes(59)), backup.RunAsync(currentTime.AddMinutes(59)));
             Assert(Directory.GetFiles(hourlyDirectory, "*.db").Length == 1, "再起動・並行実行で世代が増えました。");
-            for (int hour = 1; hour <= 7; hour++) await backup.RunAsync(currentTime.AddHours(hour));
+            ExternalBackupStatus unchanged = await backup.RunAsync(currentTime.AddHours(1));
+            Assert(unchanged.Error.Length == 0 && unchanged.HourlyResult == "unchanged" && unchanged.LastHourlyAt == currentTime
+                && unchanged.LastHourlyCheckedAt == currentTime.AddHours(1), "変更なしで保存時刻が進んだか、確認時刻が更新されません。");
+            Assert((await backup.RunAsync(currentTime.AddMinutes(61))).LastCheckedAt == unchanged.LastCheckedAt, "変更なしの後も毎分比較しています。");
+            backup = new(repository, initializer, paths, NullLogger<ExternalBackupService>.Instance);
+            Assert((await backup.RunAsync(currentTime.AddMinutes(62))).HourlyResult == "unchanged", "再起動で重複保存しました。");
+            for (int hour = 2; hour <= 8; hour++)
+            {
+                await ChangeTitleAsync(initializer, $"時間別 {hour}");
+                Assert((await backup.RunAsync(currentTime.AddHours(hour))).Error.Length == 0, "時間別保存が失敗しました。");
+            }
             Assert(Directory.GetFiles(hourlyDirectory, "*.db").Length == 6, "時間別6世代になりません。");
             Assert(Directory.GetFiles(dailyDirectory, "*.db").Length == 1, "同日の日別世代が重複しました。");
 
             // 完成名の衝突で確定に失敗しても、既存6世代の内容を一切変更しない。
             Dictionary<string, byte[]> existingBackups = Directory.GetFiles(hourlyDirectory, "*.db")
                 .ToDictionary(file => file, File.ReadAllBytes);
-            ExternalBackupStatus collision = await backup.RunAsync(currentTime.AddHours(7), force: true);
+            await ChangeTitleAsync(initializer, "衝突検証");
+            ExternalBackupStatus collision = await backup.RunAsync(currentTime.AddHours(8), force: true);
             Assert(collision.Error.Length > 0 && Directory.GetFiles(hourlyDirectory, "*.db").Length == 6, "確定失敗で既存世代を減らしました。");
             Assert(existingBackups.All(file => File.ReadAllBytes(file.Key).SequenceEqual(file.Value)), "確定失敗で既存の完成DBを上書きしました。");
-            Assert((await backup.RunAsync(currentTime.AddHours(7).AddTicks(1), force: true)).Error.Length == 0, "確定失敗後に再試行できません。");
+            Assert((await backup.RunAsync(currentTime.AddHours(8).AddTicks(1), force: true)).Error.Length == 0, "確定失敗後に再試行できません。");
 
             // 既存バックアップや管理外ファイルを取り込まず、日別も30世代までに制限する。
             string unrelatedFile = Path.Combine(hourlyDirectory, "unitodo-unrelated.db");
             File.WriteAllText(unrelatedFile, "保持対象外");
-            for (int day = 1; day <= 31; day++) await backup.RunAsync(currentTime.AddDays(day));
+            for (int day = 1; day <= 31; day++)
+            {
+                await ChangeTitleAsync(initializer, $"日別 {day}");
+                Assert((await backup.RunAsync(currentTime.AddDays(day))).Error.Length == 0, "日別保存が失敗しました。");
+            }
             Assert(Directory.GetFiles(dailyDirectory, "*.db").Length == 30, "日別30世代になりません。");
             Assert(Directory.GetFiles(hourlyDirectory, "*.db").Length == 7 && File.Exists(unrelatedFile), "管理外ファイルを削除しました。");
             Assert(!Directory.GetFiles(settings.ExternalBackupDirectory, "*.partial", SearchOption.AllDirectories).Any(), "未完成ファイルが残っています。");
+
+            // 同じ値の再書込・物理再配置は変更とせず、両区分の既存ファイルをそのまま保持する。
+            Dictionary<string, byte[]> preserved = Directory.GetFiles(settings.ExternalBackupDirectory, "*.db", SearchOption.AllDirectories)
+                .ToDictionary(file => file, File.ReadAllBytes);
+            await ChangeTitleAsync(initializer, "日別 31");
+            await using (SqliteConnection connection = initializer.OpenConnection())
+            {
+                await using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = "VACUUM;";
+                await command.ExecuteNonQueryAsync();
+            }
+            ExternalBackupStatus dailyUnchanged = await backup.RunAsync(currentTime.AddDays(32));
+            Assert(dailyUnchanged.Error.Length == 0 && dailyUnchanged.HourlyResult == "unchanged" && dailyUnchanged.DailyResult == "unchanged"
+                && dailyUnchanged.LastDailyAt == currentTime.AddDays(31) && dailyUnchanged.LastDailyCheckedAt == currentTime.AddDays(32), "日別の変更なしを判定できません。");
+            Assert(preserved.Count == Directory.GetFiles(settings.ExternalBackupDirectory, "*.db", SearchOption.AllDirectories).Length
+                && preserved.All(file => File.ReadAllBytes(file.Key).SequenceEqual(file.Value)), "変更なしで既存世代が変化しました。");
+            Assert((await backup.RunAsync(currentTime.AddDays(32).AddMinutes(1), force: true)).HourlyResult == "unchanged", "手動確認で重複保存しました。");
+
+            // 時間別と日別は各々の直近内容と比較し、時間別と同じでも古い日別は更新する。
+            await ChangeTitleAsync(initializer, "Case");
+            await backup.RunAsync(currentTime.AddDays(32).AddHours(2));
+            ExternalBackupStatus independent = await backup.RunAsync(currentTime.AddDays(33));
+            Assert(independent.HourlyResult == "unchanged" && independent.DailyResult == "saved", "時間別・日別の比較対象が混在しています。");
+            await ChangeTitleAsync(initializer, "case");
+            Assert((await backup.RunAsync(currentTime.AddDays(33).AddHours(1))).HourlyResult == "saved", "文字の大文字小文字の変更を見落としました。");
 
             // 書込失敗で古い世代を失わず、障害解消後の同じ周期で再試行できる。
             string changedDirectory = Path.Combine(directory, "unavailable");
@@ -90,15 +130,15 @@ public static class ExternalBackupTests
             settings.ExternalBackupDirectory = changedDirectory;
             await repository.SaveSettingsAsync(settings, "test");
             Assert((await backup.GetStatusAsync()).LastHourlyAt is null, "変更前の保存先の成功時刻を表示しました。");
-            ExternalBackupStatus failure = await backup.RunAsync(currentTime.AddDays(32));
+            ExternalBackupStatus failure = await backup.RunAsync(currentTime.AddDays(34));
             Assert(failure.Error.Length > 0 && failure.LastHourlyAt is null, "失敗を成功扱いしました。");
             File.Delete(changedDirectory);
-            ExternalBackupStatus recovery = await backup.RunAsync(currentTime.AddDays(32));
+            ExternalBackupStatus recovery = await backup.RunAsync(currentTime.AddDays(34));
             Assert(recovery.Error.Length == 0 && recovery.LastHourlyAt is not null, "同じ周期の再試行が成功しません。");
             Assert(Directory.GetFiles(dailyDirectory, "*.db").Length == 30, "保存先変更で旧世代を削除しました。");
             settings.ExternalBackupEnabled = false;
             await repository.SaveSettingsAsync(settings, "test");
-            await backup.RunAsync(currentTime.AddDays(33), force: true);
+            await backup.RunAsync(currentTime.AddDays(35), force: true);
             Assert(!(await backup.GetStatusAsync()).Enabled && Directory.GetFiles(Path.Combine(changedDirectory, "hourly"), "*.db").Length == 1, "OFFで書込み・削除が発生しました。");
         }
         finally
@@ -108,6 +148,17 @@ public static class ExternalBackupTests
             SqliteConnection.ClearAllPools();
             Directory.Delete(directory, recursive: true);
         }
+    }
+
+    /// <summary>テスト用DBで単一の値だけを変更し、比較対象の差分を制御する。</summary>
+    private static async Task ChangeTitleAsync(DatabaseInitializer initializer, string title)
+    {
+        // 履歴や日時の付随更新を発生させず、値の変更と同値再書込を検証する。
+        await using SqliteConnection connection = initializer.OpenConnection();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "UPDATE tasks SET title = $title WHERE identifier = 'BACKUP-TEST';";
+        command.Parameters.AddWithValue("$title", title);
+        await command.ExecuteNonQueryAsync();
     }
 
     /// <summary>バックアップDBだけを復元してアプリの保存層で読み書きできることを確認する。</summary>

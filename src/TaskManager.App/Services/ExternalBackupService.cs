@@ -85,24 +85,28 @@ public sealed class ExternalBackupService(
                 List<BackupFile> dailyFiles = ReadBackups(dailyDirectory);
                 status = status with { LastHourlyAt = hourlyFiles.FirstOrDefault()?.CreatedAt, LastDailyAt = dailyFiles.FirstOrDefault()?.CreatedAt };
 
-                // 直近成功から1時間経過した場合と、当日の保存がない場合だけ正本を複製する。
-                bool hourlyDue = force || status.LastHourlyAt is null || currentTime - status.LastHourlyAt >= TimeSpan.FromHours(1);
-                bool dailyDue = status.LastDailyAt is null || status.LastDailyAt.Value.ToLocalTime().Date < currentTime.ToLocalTime().Date;
+                // 変更なしも確認成功として周期を進め、毎分の再比較を防ぐ。再起動時は保存時刻から再開する。
+                DateTimeOffset? hourlyCheckedAt = status.LastHourlyCheckedAt ?? status.LastHourlyAt;
+                DateTimeOffset? dailyCheckedAt = status.LastDailyCheckedAt ?? status.LastDailyAt;
+                bool hourlyDue = force || status.LastHourlyAt is null || hourlyCheckedAt is null || currentTime - hourlyCheckedAt >= TimeSpan.FromHours(1);
+                bool dailyDue = status.LastDailyAt is null || dailyCheckedAt is null || dailyCheckedAt.Value.ToLocalTime().Date < currentTime.ToLocalTime().Date;
                 if (hourlyDue)
                 {
-                    await CreateSnapshotAsync(hourlyDirectory, currentTime, cancellationToken);
-                    status = status with { LastHourlyAt = currentTime };
+                    bool saved = await CreateSnapshotAsync(hourlyDirectory, hourlyFiles.FirstOrDefault()?.Path, currentTime, cancellationToken);
+                    if (saved) PruneBackups(hourlyDirectory, 6);
+                    status = status with { LastHourlyAt = saved ? currentTime : status.LastHourlyAt,
+                        LastHourlyCheckedAt = currentTime, HourlyResult = saved ? "saved" : "unchanged" };
                 }
                 if (dailyDue)
                 {
-                    await CreateSnapshotAsync(dailyDirectory, currentTime, cancellationToken);
-                    status = status with { LastDailyAt = currentTime };
+                    bool saved = await CreateSnapshotAsync(dailyDirectory, dailyFiles.FirstOrDefault()?.Path, currentTime, cancellationToken);
+                    if (saved) PruneBackups(dailyDirectory, 30);
+                    status = status with { LastDailyAt = saved ? currentTime : status.LastDailyAt,
+                        LastDailyCheckedAt = currentTime, DailyResult = saved ? "saved" : "unchanged" };
                 }
 
-                // 完成したファイルのみを対象に、時間別6世代・日別30世代へ整理する。
-                PruneBackups(hourlyDirectory, 6);
-                PruneBackups(dailyDirectory, 30);
-                status = status with { LastCheckedAt = currentTime, Error = string.Empty };
+                // 比較していない周期は確認時刻を進めず、既存世代にも触れない。
+                status = status with { LastCheckedAt = hourlyDue || dailyDue ? currentTime : status.LastCheckedAt, Error = string.Empty };
             }
             catch (Exception backupError) when (backupError is not OperationCanceledException)
             {
@@ -119,7 +123,7 @@ public sealed class ExternalBackupService(
     }
 
     /// <summary>正本DBだけを一時ファイルへ複製し、検証してから完成名へ変更する。</summary>
-    private async Task CreateSnapshotAsync(string directory, DateTimeOffset currentTime, CancellationToken cancellationToken)
+    private async Task<bool> CreateSnapshotAsync(string directory, string? previousPath, DateTimeOffset currentTime, CancellationToken cancellationToken)
     {
         // 過去のバックアップや資格情報は取り込まず、SQLiteオンラインバックアップで整合性を保つ。
         string destination = Path.Combine(directory, $"unitodo-{currentTime.UtcDateTime.ToString(TimestampFormat, CultureInfo.InvariantCulture)}.db");
@@ -141,6 +145,8 @@ public sealed class ExternalBackupService(
                     throw new InvalidOperationException("バックアップDBの整合性検証に失敗しました。");
                 }
             }
+            // 同じ区分の直近世代と論理内容が一致すれば、一時ファイルを回収して保存を省略する。
+            if (previousPath is not null && await HasSameContentsAsync(temporary, previousPath, cancellationToken)) return false;
             // SQLiteの接続を閉じてディスクへ反映した後だけ、世代管理対象に加える。
             using (FileStream completedFile = new(temporary, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             {
@@ -148,6 +154,7 @@ public sealed class ExternalBackupService(
             }
             cancellationToken.ThrowIfCancellationRequested();
             File.Move(temporary, destination);
+            return true;
         }
         finally
         {
@@ -157,6 +164,79 @@ public sealed class ExternalBackupService(
                 File.Delete(temporary + suffix);
             }
         }
+    }
+
+    /// <summary>DB構造と全テーブルの値を比較し、物理配置や更新カウンターの差を除外する。</summary>
+    private static async Task<bool> HasSameContentsAsync(string currentPath, string previousPath, CancellationToken cancellationToken)
+    {
+        // どちらも完成したスナップショットを読取専用で開き、元DBや比較対象を変更しない。
+        await using SqliteConnection current = OpenSnapshot(currentPath);
+        await using SqliteConnection previous = OpenSnapshot(previousPath);
+        const string schemaQuery = "SELECT type, name, tbl_name, sql FROM sqlite_schema ORDER BY type COLLATE BINARY, name COLLATE BINARY;";
+        if (!await HasSameRowsAsync(current, previous, schemaQuery, cancellationToken)) return false;
+        await using SqliteCommand tables = current.CreateCommand();
+        tables.CommandText = "SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name;";
+        List<string> tableNames = [];
+        await using (SqliteDataReader reader = await tables.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken)) tableNames.Add(reader.GetString(0));
+        }
+        foreach (string tableName in tableNames)
+        {
+            // 全列で並べて重複行も比較し、ID用の大文字小文字を無視する照合は使用しない。
+            string quotedTable = QuoteIdentifier(tableName);
+            await using SqliteCommand columns = current.CreateCommand();
+            columns.CommandText = $"SELECT * FROM {quotedTable} LIMIT 0;";
+            await using SqliteDataReader reader = await columns.ExecuteReaderAsync(cancellationToken);
+            string ordering = string.Join(", ", Enumerable.Range(0, reader.FieldCount)
+                .Select(column => QuoteIdentifier(reader.GetName(column)) + " COLLATE BINARY"));
+            if (!await HasSameRowsAsync(current, previous, $"SELECT * FROM {quotedTable} ORDER BY {ordering};", cancellationToken)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>比較用のSQLite接続に読取専用設定とアプリの照合順序を設定する。</summary>
+    private static SqliteConnection OpenSnapshot(string path)
+    {
+        // 古い世代のファイルを変更せず、比較後にファイルハンドルを確実に解放する。
+        SqliteConnection connection = new(new SqliteConnectionStringBuilder
+        { DataSource = path, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        connection.Open();
+        connection.CreateCollation("TASK_IDENTIFIER", StringComparer.OrdinalIgnoreCase.Compare);
+        return connection;
+    }
+
+    /// <summary>同じ順序で取得した行を型と値の両方で比較する。</summary>
+    private static async Task<bool> HasSameRowsAsync(SqliteConnection current, SqliteConnection previous, string query, CancellationToken cancellationToken)
+    {
+        // 全件をメモリに展開せず、各行のNULL・数値・文字列・バイナリ値を比較する。
+        await using SqliteCommand currentCommand = current.CreateCommand();
+        await using SqliteCommand previousCommand = previous.CreateCommand();
+        currentCommand.CommandText = query;
+        previousCommand.CommandText = query;
+        await using SqliteDataReader currentReader = await currentCommand.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader previousReader = await previousCommand.ExecuteReaderAsync(cancellationToken);
+        if (currentReader.FieldCount != previousReader.FieldCount) return false;
+        while (await currentReader.ReadAsync(cancellationToken))
+        {
+            if (!await previousReader.ReadAsync(cancellationToken)) return false;
+            for (int column = 0; column < currentReader.FieldCount; column++)
+            {
+                object currentValue = currentReader.GetValue(column);
+                object previousValue = previousReader.GetValue(column);
+                bool same = currentValue is byte[] currentBytes && previousValue is byte[] previousBytes
+                    ? currentBytes.AsSpan().SequenceEqual(previousBytes) : Equals(currentValue, previousValue);
+                if (!same) return false;
+            }
+        }
+        return !await previousReader.ReadAsync(cancellationToken);
+    }
+
+    /// <summary>DBから取得した識別子をSQL内で安全に引用する。</summary>
+    private static string QuoteIdentifier(string identifier)
+    {
+        // 名前中の引用符を二重化し、列名やテーブル名をSQLとして解釈させない。
+        return "\"" + identifier.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
     }
 
     /// <summary>この機能が生成する厳密な名前の完成DBだけを新しい順に取得する。</summary>
@@ -190,4 +270,11 @@ public sealed class ExternalBackupService(
 /// <summary>追加バックアップの設定と直近の確認結果を表す。</summary>
 public sealed record ExternalBackupStatus(
     bool Enabled, string Directory, DateTimeOffset? LastHourlyAt, DateTimeOffset? LastDailyAt,
-    DateTimeOffset? LastCheckedAt, string Error);
+    DateTimeOffset? LastCheckedAt, string Error)
+{
+    // 区分ごとの確認成功時刻と保存・変更なしの結果を保持する。
+    public DateTimeOffset? LastHourlyCheckedAt { get; init; }
+    public DateTimeOffset? LastDailyCheckedAt { get; init; }
+    public string HourlyResult { get; init; } = string.Empty;
+    public string DailyResult { get; init; } = string.Empty;
+}
