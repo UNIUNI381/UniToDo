@@ -52,6 +52,10 @@ public sealed class AutomationWorker(
         DateTimeOffset currentTime = DateTimeOffset.Now;
         bool userInterfaceChanged = false;
 
+        // 他の自動処理が失敗しても追加バックアップを試行し、保存失敗は次の1分周期で再試行する。
+        ExternalBackupService externalBackup = serviceScope.ServiceProvider.GetRequiredService<ExternalBackupService>();
+        await externalBackup.RunAsync(currentTime, cancellationToken: cancellationToken);
+
         // 起動時と日付変更後に履歴を整理し、失敗時は次の周期で再試行する。
         DateOnly currentDate = DateOnly.FromDateTime(currentTime.Date);
         if (lastHistoryCleanupDate != currentDate)

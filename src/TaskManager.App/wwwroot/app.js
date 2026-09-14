@@ -3516,6 +3516,43 @@ function initializeSettingsActions() {
   document.getElementById("calendar-credentials").addEventListener("change", uploadCalendarCredentials);
   document.getElementById("connect-calendar").addEventListener("click", connectCalendar);
   document.getElementById("sync-calendar").addEventListener("click", synchronizeCalendar);
+  document.getElementById("run-external-backup").addEventListener("click", runExternalBackup);
+  document.getElementById("refresh-external-backup").addEventListener("click", loadExternalBackupStatus);
+}
+
+/** 追加バックアップの保存済み設定と直近結果を表示する。 */
+async function loadExternalBackupStatus() {
+  // 保存先のエラーをHTMLとして解釈せず、未成功と停止状態を区別して表示する。
+  const statusElement = document.getElementById("external-backup-status");
+  try {
+    const status = await apiRequest("/api/v1/backup/status");
+    const hourly = status.lastHourlyAt ? new Date(status.lastHourlyAt).toLocaleString("ja-JP") : "未保存";
+    const daily = status.lastDailyAt ? new Date(status.lastDailyAt).toLocaleString("ja-JP") : "未保存";
+    statusElement.textContent = !status.enabled ? "OFF：追加バックアップは停止しています。"
+      : `時間別の最終保存：${hourly} ／ 日別の最終保存：${daily}。${status.error ? `失敗：${status.error} 次の周期で再試行します。` : status.lastCheckedAt ? "保存先を確認済みです。" : "次の自動実行を待っています（通常1分以内）。"}`;
+    document.getElementById("run-external-backup").disabled = !status.enabled;
+  } catch (error) {
+    statusElement.textContent = `状態の取得に失敗しました：${error.message}`;
+  }
+}
+
+/** 保存済み設定で追加バックアップを作成して結果を表示する。 */
+async function runExternalBackup() {
+  // 未保存のフォーム内容と保存済みの実行先が食い違う操作を防ぐ。
+  if (applicationState.settingsFormDirty) {
+    showNotice("先に設定を保存してください。", true);
+    return;
+  }
+  const button = document.getElementById("run-external-backup");
+  button.disabled = true;
+  try {
+    const status = await apiRequest("/api/v1/backup/external", { method: "POST" });
+    showNotice(status.error || (status.enabled ? "バックアップを保存しました。" : "追加バックアップはOFFです。"), Boolean(status.error));
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    await loadExternalBackupStatus();
+  }
 }
 
 /** 現在設定を読み込んでフォームへ表示する。 */
@@ -3530,6 +3567,7 @@ async function loadSettings() {
     else field.value = fieldValue;
   }
   applicationState.settingsFormDirty = false;
+  await loadExternalBackupStatus();
   if (applicationState.uiChangeRefreshPending) {
     window.setTimeout(applyPendingUiChange, 0);
   }

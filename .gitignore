@@ -14,6 +14,7 @@ packages/
 *.db-wal
 *.db-shm
 *.db-journal
+*.db.*.partial*
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm

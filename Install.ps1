@@ -246,5 +246,6 @@ if ($WhatIfPreference) {
 }
 else {
     Write-Output "インストール先: $installDirectory"
+    Write-Output "推奨: 設定画面の「追加バックアップ」で別の物理ディスク上の専用フォルダを指定してください。初期設定はOFFです。別ディスクがなければOFFのまま利用できます。"
     Write-Output "新しく端末を開いた後、taskctl now --json で疎通を確認してください。"
 }

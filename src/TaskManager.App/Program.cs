@@ -303,6 +303,7 @@ public static class Program
         services.AddSingleton<SystemIncidentService>();
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<TaskRepository>();
+        services.AddSingleton<ExternalBackupService>();
         services.AddSingleton<TimeEntryRepository>();
         services.AddSingleton<ProjectRepository>();
         services.AddSingleton<CalendarAvailabilityService>();

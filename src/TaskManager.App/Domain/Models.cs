@@ -73,6 +73,10 @@ public sealed class TaskManagerSettings
     public bool NotificationsEnabled { get; set; } = true;
     public int LongTimerWarningMinutes { get; set; } = 180;
 
+    // 任意フォルダへの追加バックアップの有効状態と保存先を保持する。
+    public bool ExternalBackupEnabled { get; set; }
+    public string ExternalBackupDirectory { get; set; } = string.Empty;
+
     // 利用者が設定したCodex音声入力の送信先を保持する。
     public string CodexThreadIdentifier { get; set; } = TaskConstants.DefaultCodexThreadIdentifier;
 }

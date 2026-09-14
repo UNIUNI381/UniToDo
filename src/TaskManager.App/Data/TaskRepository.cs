@@ -819,7 +819,9 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
             ["timeZoneIdentifier"] = settings.TimeZoneIdentifier,
             ["notificationsEnabled"] = settings.NotificationsEnabled.ToString(CultureInfo.InvariantCulture),
             ["longTimerWarningMinutes"] = settings.LongTimerWarningMinutes.ToString(CultureInfo.InvariantCulture),
-            ["codexThreadIdentifier"] = settings.CodexThreadIdentifier
+            ["codexThreadIdentifier"] = settings.CodexThreadIdentifier,
+            ["externalBackupEnabled"] = settings.ExternalBackupEnabled.ToString(CultureInfo.InvariantCulture),
+            ["externalBackupDirectory"] = settings.ExternalBackupDirectory
         };
     }
 
@@ -828,6 +830,8 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
     {
         // 不正値や不足値は既定値へ戻す。
         TaskManagerSettings settings = new();
+        settings.ExternalBackupEnabled = GetBoolean(values, "externalBackupEnabled", settings.ExternalBackupEnabled);
+        settings.ExternalBackupDirectory = GetText(values, "externalBackupDirectory", settings.ExternalBackupDirectory);
         settings.CalendarIdentifiers = GetText(values, "calendarIdentifiers", settings.CalendarIdentifiers);
         settings.CalendarEmbedUrl = GetText(values, "calendarEmbedUrl", settings.CalendarEmbedUrl);
         settings.ActivityStart = GetText(values, "activityStart", settings.ActivityStart);

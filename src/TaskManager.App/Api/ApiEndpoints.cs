@@ -69,6 +69,8 @@ public static class ApiEndpoints
         api.MapPost("/calendar/connect", ConnectCalendarAsync);
         api.MapPost("/calendar/synchronize", SynchronizeCalendarAsync);
         api.MapPost("/backup", CreateBackupAsync);
+        api.MapGet("/backup/status", GetExternalBackupStatusAsync);
+        api.MapPost("/backup/external", CreateExternalBackupAsync);
     }
 
     /// <summary>画面が接続経路に合わせてPC専用操作を隠すための情報を返す。</summary>
@@ -716,6 +718,7 @@ public static class ApiEndpoints
         HttpRequest request,
         TaskRepository repository,
         RecommendationService recommendationService,
+        TaskManager.Configuration.TaskManagerPaths paths,
         CancellationToken cancellationToken)
     {
         // 相対係数の範囲と最低1つの有効係数を検証してから全設定を保存する。
@@ -742,6 +745,7 @@ public static class ApiEndpoints
         }
         settings.CodexThreadIdentifier = CodexThreadIdentifier.Normalize(settings.CodexThreadIdentifier);
         settings.CalendarEmbedUrl = CalendarEmbedUrlValidator.Normalize(settings.CalendarEmbedUrl);
+        ExternalBackupService.ValidateSettings(settings, paths);
         await repository.SaveSettingsAsync(settings, GetSource(request), cancellationToken);
         return Results.Ok(await recommendationService.RefreshAsync(cancellationToken));
     }
@@ -841,6 +845,20 @@ public static class ApiEndpoints
         int eventCount = await calendarService.SynchronizeAsync(false, cancellationToken);
         await recommendationService.RefreshAsync(cancellationToken);
         return Results.Ok(new { eventCount });
+    }
+
+    /// <summary>追加バックアップの直近結果をPCの設定画面へ返す。</summary>
+    private static async Task<IResult> GetExternalBackupStatusAsync(ExternalBackupService backup, CancellationToken cancellationToken)
+    {
+        // 保存先の走査や新規保存を行わず、保存済み設定と実行結果だけを返す。
+        return Results.Ok(await backup.GetStatusAsync(cancellationToken));
+    }
+
+    /// <summary>保存済み設定に従って追加バックアップを直ちに試行する。</summary>
+    private static async Task<IResult> CreateExternalBackupAsync(ExternalBackupService backup, CancellationToken cancellationToken)
+    {
+        // OFFのままでは書き込まず、手動実行も時間別6世代の枠で管理する。
+        return Results.Ok(await backup.RunAsync(DateTimeOffset.Now, force: true, cancellationToken));
     }
 
     /// <summary>利用者操作でSQLiteバックアップを作成する。</summary>

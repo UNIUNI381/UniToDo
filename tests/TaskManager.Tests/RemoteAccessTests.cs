@@ -27,6 +27,8 @@ public static class RemoteAccessTests
         await CheckAsync("chat missing origin", settings, true, "/api/v1/assistant/messages", "POST", null, null, 403);
         await CheckAsync("remote synchronize", settings, true, "/api/v1/calendar/synchronize", "POST", settings.ServeOrigin, null, 204);
         await CheckAsync("remote settings read", settings, true, "/api/v1/settings", "GET", null, null, 204);
+        await CheckAsync("remote backup status", settings, true, "/api/v1/backup/status", "GET", null, null, 403);
+        await CheckAsync("remote backup creation", settings, true, "/api/v1/backup/external", "POST", settings.ServeOrigin, null, 403);
         await CheckAsync("disabled", new(), true, "/api/v1/tasks", "GET", null, null, 403);
         await CheckAsync("other user", settings, true, "/api/v1/tasks", "GET", null, "other-user", 403);
         await CheckAsync("missing identity", settings, true, "/api/v1/tasks", "GET", null, "missing-user", 403);

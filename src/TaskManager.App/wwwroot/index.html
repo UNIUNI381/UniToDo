@@ -263,6 +263,19 @@
               <button id="sync-calendar" type="button" class="secondary-button">予定を同期</button>
             </div>
           </article>
+          <article class="settings-card">
+            <h2>追加バックアップ</h2>
+            <p>ドライブ故障に備え、Cドライブとは別の物理ディスクに保存することをおすすめします。別ディスクがない場合はOFFのまま利用できます。</p>
+            <label class="checkbox-label"><input name="externalBackupEnabled" type="checkbox">指定フォルダへのバックアップを有効にする</label>
+            <label>バックアップ専用フォルダ<input name="externalBackupDirectory" type="text" placeholder="保存先の絶対パスを入力"></label>
+            <small class="field-help">初期設定はOFF。正本DBだけを、稼働中は1時間ごとに6世代・1日ごとに30世代保存します。従来の本体内バックアップは継続します。OFFや保存先変更で既存のバックアップは削除しません。</small>
+            <p id="external-backup-status" role="status">状態を確認中…</p>
+            <div class="inline-actions">
+              <button id="run-external-backup" type="button" class="secondary-button">今すぐバックアップ</button>
+              <button id="refresh-external-backup" type="button" class="secondary-button">状態を更新</button>
+            </div>
+            <small class="field-help">保存先とON/OFFは「設定を保存」で反映します。手動保存も時間別6世代に含まれます。</small>
+          </article>
           <button type="submit" class="primary-button save-button">設定を保存</button>
         </form>
       </section>
@@ -429,6 +442,6 @@
   <link rel="stylesheet" href="assistant.css?v=20260910-02">
   <script src="assistant.js?v=20260911-04" defer></script>
   <script src="mobile-navigation.js?v=20260910-03" defer></script>
-  <script src="app.js?v=20260913-02" defer></script>
+  <script src="app.js?v=20260915-01" defer></script>
 </body>
 </html>
