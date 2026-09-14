@@ -52,10 +52,28 @@ public sealed class ProjectRepository(DatabaseInitializer databaseInitializer)
         string projectIdentifier,
         CancellationToken cancellationToken = default)
     {
-        // アーカイブ済みも含む共通読込からID一致を返す。
-        List<ProjectRecord> projects = await GetProjectsAsync(true, cancellationToken);
-        return projects.FirstOrDefault(project =>
-            string.Equals(project.Identifier, projectIdentifier, StringComparison.OrdinalIgnoreCase));
+        // 対象プロジェクトとその背景・別名・期限規則だけを索引で取得する。
+        await using SqliteConnection connection = initializer.OpenConnection();
+        ProjectRecord project;
+        await using (SqliteCommand command = connection.CreateCommand())
+        {
+            command.CommandText = "SELECT * FROM projects WHERE identifier COLLATE TASK_IDENTIFIER = $identifier LIMIT 1;";
+            command.Parameters.AddWithValue("$identifier", projectIdentifier);
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+            project = ReadProject(reader);
+        }
+        Dictionary<string, ProjectRecord> projectMap = new(StringComparer.OrdinalIgnoreCase)
+        {
+            [project.Identifier] = project
+        };
+        await LoadAliasesAsync(connection, projectMap, cancellationToken, project.Identifier);
+        await LoadContextsAsync(connection, projectMap, cancellationToken, project.Identifier);
+        await LoadDeadlineRulesAsync(connection, projectMap, cancellationToken, project.Identifier);
+        return project;
     }
 
     /// <summary>プロジェクト本体を追加または更新して履歴を記録する。</summary>
@@ -313,11 +331,14 @@ public sealed class ProjectRepository(DatabaseInitializer databaseInitializer)
     private static async Task LoadAliasesAsync(
         SqliteConnection connection,
         IReadOnlyDictionary<string, ProjectRecord> projectMap,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? selectedIdentifier = null)
     {
         // プロジェクトID順で別名を読み込む。
         await using SqliteCommand aliasCommand = connection.CreateCommand();
-        aliasCommand.CommandText = "SELECT * FROM project_aliases ORDER BY project_identifier, created_at;";
+        aliasCommand.CommandText = selectedIdentifier is null
+            ? "SELECT * FROM project_aliases ORDER BY project_identifier, created_at;"
+            : "SELECT * FROM project_aliases WHERE project_identifier = $identifier ORDER BY project_identifier, created_at;";
+        aliasCommand.Parameters.AddWithValue("$identifier", (object?)selectedIdentifier ?? DBNull.Value);
         await using SqliteDataReader aliasReader = await aliasCommand.ExecuteReaderAsync(cancellationToken);
         while (await aliasReader.ReadAsync(cancellationToken))
         {
@@ -342,7 +363,7 @@ public sealed class ProjectRepository(DatabaseInitializer databaseInitializer)
     private static async Task LoadContextsAsync(
         SqliteConnection connection,
         IReadOnlyDictionary<string, ProjectRecord> projectMap,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? selectedIdentifier = null)
     {
         // 高優先度、新しい更新日時の順で背景情報を読み込む。
         await using SqliteCommand contextCommand = connection.CreateCommand();
@@ -350,6 +371,11 @@ public sealed class ProjectRepository(DatabaseInitializer databaseInitializer)
             SELECT * FROM project_context_documents
             ORDER BY project_identifier, priority DESC, updated_at DESC;
             """;
+        if (selectedIdentifier is not null)
+        {
+            contextCommand.CommandText = "SELECT * FROM project_context_documents WHERE project_identifier = $identifier ORDER BY project_identifier, priority DESC, updated_at DESC;";
+            contextCommand.Parameters.AddWithValue("$identifier", selectedIdentifier);
+        }
         await using SqliteDataReader contextReader = await contextCommand.ExecuteReaderAsync(cancellationToken);
         while (await contextReader.ReadAsync(cancellationToken))
         {
@@ -378,11 +404,14 @@ public sealed class ProjectRepository(DatabaseInitializer databaseInitializer)
     private static async Task LoadDeadlineRulesAsync(
         SqliteConnection connection,
         IReadOnlyDictionary<string, ProjectRecord> projectMap,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? selectedIdentifier = null)
     {
         // プロジェクトごとに最大1件の期限規則を復元する。
         await using SqliteCommand ruleCommand = connection.CreateCommand();
-        ruleCommand.CommandText = "SELECT * FROM project_deadline_rules ORDER BY project_identifier;";
+        ruleCommand.CommandText = selectedIdentifier is null
+            ? "SELECT * FROM project_deadline_rules ORDER BY project_identifier;"
+            : "SELECT * FROM project_deadline_rules WHERE project_identifier = $identifier;";
+        ruleCommand.Parameters.AddWithValue("$identifier", (object?)selectedIdentifier ?? DBNull.Value);
         await using SqliteDataReader ruleReader = await ruleCommand.ExecuteReaderAsync(cancellationToken);
         while (await ruleReader.ReadAsync(cancellationToken))
         {

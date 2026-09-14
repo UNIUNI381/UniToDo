@@ -11,42 +11,93 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
     private readonly DatabaseInitializer initializer = databaseInitializer;
 
     /// <summary>全タスクと依存関係を読み込む。</summary>
-    public async Task<List<ManagedTask>> GetTasksAsync(CancellationToken cancellationToken = default)
+    public Task<List<ManagedTask>> GetTasksAsync(CancellationToken cancellationToken = default)
     {
-        // タスク本体を読み込んだ後で依存関係をまとめて関連付ける。
-        await using SqliteConnection connection = initializer.OpenConnection();
-        List<ManagedTask> tasks = [];
-        await using SqliteCommand taskCommand = connection.CreateCommand();
-        taskCommand.CommandText = "SELECT * FROM tasks ORDER BY created_at, identifier;";
-        await using (SqliteDataReader taskReader = await taskCommand.ExecuteReaderAsync(cancellationToken))
-        {
-            while (await taskReader.ReadAsync(cancellationToken))
-            {
-                tasks.Add(ReadTask(taskReader));
-            }
-        }
+        // 全体検証など全件が必要な呼出元向けに従来の順序で返す。
+        return ReadTasksAsync("1 = 1", null, cancellationToken);
+    }
 
-        Dictionary<string, ManagedTask> taskMap = tasks.ToDictionary(task => task.Identifier, StringComparer.OrdinalIgnoreCase);
-        await using SqliteCommand dependencyCommand = connection.CreateCommand();
-        dependencyCommand.CommandText = "SELECT task_identifier, dependency_identifier FROM task_dependencies ORDER BY task_identifier, dependency_identifier;";
-        await using SqliteDataReader dependencyReader = await dependencyCommand.ExecuteReaderAsync(cancellationToken);
-        while (await dependencyReader.ReadAsync(cancellationToken))
+    /// <summary>指定IDのタスクとその依存関係だけを取得する。</summary>
+    public async Task<ManagedTask?> GetTaskAsync(string taskIdentifier, CancellationToken cancellationToken = default)
+    {
+        // 従来のOrdinalIgnoreCaseと同じ照合の索引で対象を検索する。
+        List<ManagedTask> tasks = await ReadTasksAsync(
+            "tasks.identifier COLLATE TASK_IDENTIFIER = $value", taskIdentifier, cancellationToken);
+        return tasks.FirstOrDefault();
+    }
+
+    /// <summary>指定状態のタスクとその依存関係だけを取得する。</summary>
+    public Task<List<ManagedTask>> GetTasksByStatusAsync(string status, CancellationToken cancellationToken = default)
+    {
+        // 状態索引で実行中タスクなどの定期確認を限定する。
+        return ReadTasksAsync("tasks.status = $value", status, cancellationToken);
+    }
+
+    /// <summary>未完了タスクと必要な完了済み依存先の識別情報を推薦用に取得する。</summary>
+    public async Task<List<ManagedTask>> GetRecommendationTasksAsync(CancellationToken cancellationToken = default)
+    {
+        // 期限表示と後続数の計算に必要な下書き・待機・要確認も保持する。
+        List<ManagedTask> tasks = await ReadTasksAsync(
+            "tasks.status NOT IN ('完了', '中止')", null, cancellationToken);
+        await using SqliteConnection connection = initializer.OpenConnection();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT DISTINCT completed.identifier
+            FROM tasks AS active
+            CROSS JOIN task_dependencies AS dependency
+              ON dependency.task_identifier COLLATE TASK_IDENTIFIER = active.identifier
+            CROSS JOIN tasks AS completed INDEXED BY index_tasks_identifier_lookup
+              ON completed.identifier COLLATE TASK_IDENTIFIER = dependency.dependency_identifier
+            WHERE active.status NOT IN ('完了', '中止') AND completed.status = '完了';
+            """;
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
         {
-            string taskIdentifier = dependencyReader.GetString(0);
-            if (taskMap.TryGetValue(taskIdentifier, out ManagedTask? task))
-            {
-                task.DependencyIdentifiers.Add(dependencyReader.GetString(1));
-            }
+            // 完了済みタスクは依存解除判定のIDと状態だけを利用する。
+            tasks.Add(new ManagedTask { Identifier = reader.GetString(0), Status = TaskConstants.CompletedStatus });
         }
         return tasks;
     }
 
-    /// <summary>指定IDのタスクを取得する。</summary>
-    public async Task<ManagedTask?> GetTaskAsync(string taskIdentifier, CancellationToken cancellationToken = default)
+    /// <summary>内部で指定した条件に合うタスクと依存関係を読み込む。</summary>
+    private async Task<List<ManagedTask>> ReadTasksAsync(
+        string predicate, string? value, CancellationToken cancellationToken)
     {
-        // 全タスクの共通読込を利用して依存関係付きで返す。
-        List<ManagedTask> tasks = await GetTasksAsync(cancellationToken);
-        return tasks.FirstOrDefault(task => string.Equals(task.Identifier, taskIdentifier, StringComparison.OrdinalIgnoreCase));
+        // SQL条件は内部の固定文字列だけを使用し、入力値はパラメーターで渡す。
+        await using SqliteConnection connection = initializer.OpenConnection();
+        List<ManagedTask> tasks = [];
+        await using SqliteCommand taskCommand = connection.CreateCommand();
+        taskCommand.CommandText = $"SELECT tasks.* FROM tasks WHERE {predicate} ORDER BY tasks.created_at, tasks.identifier;";
+        taskCommand.Parameters.AddWithValue("$value", (object?)value ?? DBNull.Value);
+        await using (SqliteDataReader reader = await taskCommand.ExecuteReaderAsync(cancellationToken))
+        {
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                tasks.Add(ReadTask(reader));
+            }
+        }
+        if (tasks.Count == 0)
+        {
+            return tasks;
+        }
+
+        // 対象タスクへ結び付く依存関係だけを索引で取得する。
+        Dictionary<string, ManagedTask> taskMap = tasks.ToDictionary(task => task.Identifier, StringComparer.OrdinalIgnoreCase);
+        await using SqliteCommand dependencyCommand = connection.CreateCommand();
+        dependencyCommand.CommandText = $"""
+            SELECT dependency.task_identifier, dependency.dependency_identifier
+            FROM tasks CROSS JOIN task_dependencies AS dependency
+              ON dependency.task_identifier COLLATE TASK_IDENTIFIER = tasks.identifier
+            WHERE {predicate}
+            ORDER BY dependency.task_identifier, dependency.dependency_identifier;
+            """;
+        dependencyCommand.Parameters.AddWithValue("$value", (object?)value ?? DBNull.Value);
+        await using SqliteDataReader dependencyReader = await dependencyCommand.ExecuteReaderAsync(cancellationToken);
+        while (await dependencyReader.ReadAsync(cancellationToken))
+        {
+            taskMap[dependencyReader.GetString(0)].DependencyIdentifiers.Add(dependencyReader.GetString(1));
+        }
+        return tasks;
     }
 
     /// <summary>タスクを追加または更新して履歴を記録する。</summary>
@@ -139,14 +190,44 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
         string recommendationDetails,
         CancellationToken cancellationToken = default)
     {
-        // 候補外の計算列を消去し、候補の値を一括更新する。
+        // 候補から外れた行だけを消去し、候補は保存済み値との差分だけ更新する。
         await using SqliteConnection connection = initializer.OpenConnection();
         await using SqliteTransaction transaction = connection.BeginTransaction();
+        HashSet<string> evaluatedIdentifiers = evaluations.Select(evaluation => evaluation.Task.Identifier)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        List<string> staleIdentifiers = [];
+        await using (SqliteCommand previousCommand = connection.CreateCommand())
+        {
+            previousCommand.Transaction = transaction;
+            previousCommand.CommandText = """
+                SELECT identifier FROM tasks
+                WHERE suggested_minutes <> 0 OR priority_score <> 0
+                   OR slack_minutes IS NOT NULL OR recommendation_reason <> '';
+                """;
+            await using SqliteDataReader reader = await previousCommand.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                string identifier = reader.GetString(0);
+                if (!evaluatedIdentifiers.Contains(identifier))
+                {
+                    staleIdentifiers.Add(identifier);
+                }
+            }
+        }
         await using (SqliteCommand clearCommand = connection.CreateCommand())
         {
             clearCommand.Transaction = transaction;
-            clearCommand.CommandText = "UPDATE tasks SET suggested_minutes = 0, priority_score = 0, slack_minutes = NULL, recommendation_reason = '';";
-            await clearCommand.ExecuteNonQueryAsync(cancellationToken);
+            clearCommand.CommandText = """
+                UPDATE tasks SET suggested_minutes = 0, priority_score = 0,
+                    slack_minutes = NULL, recommendation_reason = '' WHERE identifier = $identifier;
+                """;
+            SqliteParameter identifierParameter = clearCommand.Parameters.Add("$identifier", SqliteType.Text);
+            clearCommand.Prepare();
+            foreach (string identifier in staleIdentifiers)
+            {
+                identifierParameter.Value = identifier;
+                await clearCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
         await using (SqliteCommand evaluationCommand = connection.CreateCommand())
         {
@@ -157,7 +238,9 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
                     priority_score = $priorityScore,
                     slack_minutes = $slackMinutes,
                     recommendation_reason = $reason
-                WHERE identifier = $identifier;
+                WHERE identifier = $identifier
+                  AND (suggested_minutes IS NOT $suggestedMinutes OR priority_score IS NOT $priorityScore
+                    OR slack_minutes IS NOT $slackMinutes OR recommendation_reason IS NOT $reason);
                 """;
             SqliteParameter suggestedMinutesParameter = evaluationCommand.Parameters.Add("$suggestedMinutes", SqliteType.Integer);
             SqliteParameter priorityScoreParameter = evaluationCommand.Parameters.Add("$priorityScore", SqliteType.Real);
@@ -180,9 +263,9 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
         }
 
         string previousRecommendationKey = await GetStateAsync(connection, transaction, "last_recommendation", cancellationToken) ?? string.Empty;
-        await SetStateAsync(connection, transaction, "last_recommendation", recommendationKey, cancellationToken);
         if (!string.Equals(previousRecommendationKey, recommendationKey, StringComparison.Ordinal))
         {
+            await SetStateAsync(connection, transaction, "last_recommendation", recommendationKey, cancellationToken);
             await InsertHistoryAsync(connection, transaction, new HistoryRecord
             {
                 OccurredAt = DateTimeOffset.Now,
@@ -449,32 +532,14 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
             }
         }
 
-        List<ManagedTask> tasks = await GetTasksAsync(cancellationToken);
+        List<ManagedTask> tasks = await ReadTasksAsync("tasks.draft_batch_identifier IS NOT NULL", null, cancellationToken);
+        ILookup<string, ManagedTask> tasksByBatch = tasks.ToLookup(
+            task => task.DraftBatchIdentifier ?? string.Empty, StringComparer.OrdinalIgnoreCase);
         foreach (DraftBatchRecord draftBatch in draftBatches)
         {
             // バッチIDが一致する下書きだけを読取結果へ設定する。
-            List<ManagedTask> batchTasks = tasks
-                .Where(task => string.Equals(
-                    task.DraftBatchIdentifier,
-                    draftBatch.BatchIdentifier,
-                    StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            draftBatch.TaskCount = batchTasks.Count;
-            draftBatch.ProjectIdentifiers = batchTasks
-                .Select(task => task.ProjectIdentifier)
-                .Where(identifier => !string.IsNullOrWhiteSpace(identifier))
-                .Select(identifier => identifier!)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderBy(identifier => identifier, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            draftBatch.TaskMappings = batchTasks
-                .Where(task => !string.IsNullOrWhiteSpace(task.AiReferenceKey))
-                .Select(task => new DraftTaskMapping
-                {
-                    AiReferenceKey = task.AiReferenceKey,
-                    TaskIdentifier = task.Identifier
-                })
-                .ToList();
+            List<ManagedTask> batchTasks = tasksByBatch[draftBatch.BatchIdentifier].ToList();
+            PopulateDraftBatch(draftBatch, batchTasks);
         }
         if (!string.IsNullOrWhiteSpace(projectIdentifier))
         {
@@ -488,40 +553,65 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
     }
 
     /// <summary>指定IDの下書きバッチとタスク一覧を取得する。</summary>
-    public async Task<DraftBatchRecord?> GetDraftBatchAsync(
-        string batchIdentifier,
-        CancellationToken cancellationToken = default)
+    public Task<DraftBatchRecord?> GetDraftBatchAsync(
+        string batchIdentifier, CancellationToken cancellationToken = default)
     {
-        // 共通一覧読込からIDが完全一致する1件へ詳細タスクを追加して返す。
-        List<DraftBatchRecord> draftBatches = await GetDraftBatchesAsync(null, cancellationToken);
-        DraftBatchRecord? selectedBatch = draftBatches.FirstOrDefault(draftBatch => string.Equals(
-            draftBatch.BatchIdentifier,
-            batchIdentifier,
-            StringComparison.OrdinalIgnoreCase));
-        if (selectedBatch is null)
-        {
-            return null;
-        }
-        selectedBatch.Tasks = (await GetTasksAsync(cancellationToken))
-            .Where(task => string.Equals(
-                task.DraftBatchIdentifier,
-                selectedBatch.BatchIdentifier,
-                StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        return selectedBatch;
+        // 単一バッチの取得で全バッチと全タスクを展開しない。
+        return ReadDraftBatchAsync("identifier COLLATE TASK_IDENTIFIER = $value", batchIdentifier, cancellationToken);
     }
 
     /// <summary>冪等キーに対応する既存下書きバッチを取得する。</summary>
-    public async Task<DraftBatchRecord?> GetDraftBatchByRequestKeyAsync(
-        string requestKey,
-        CancellationToken cancellationToken = default)
+    public Task<DraftBatchRecord?> GetDraftBatchByRequestKeyAsync(
+        string requestKey, CancellationToken cancellationToken = default)
     {
-        // 再送時は保存済みバッチを返して重複登録を防ぐ。
-        List<DraftBatchRecord> draftBatches = await GetDraftBatchesAsync(null, cancellationToken);
-        return draftBatches.FirstOrDefault(draftBatch => string.Equals(
-            draftBatch.IdempotencyKey,
-            requestKey,
-            StringComparison.Ordinal));
+        // 冪等キーの既存一意索引で再送時の対象だけを取得する。
+        return ReadDraftBatchAsync("request_key = $value", requestKey, cancellationToken);
+    }
+
+    /// <summary>内部条件に一致するバッチと所属タスクだけを読み込む。</summary>
+    private async Task<DraftBatchRecord?> ReadDraftBatchAsync(
+        string predicate, string value, CancellationToken cancellationToken)
+    {
+        // バッチ本体のリーダーを閉じてから所属タスクを読み込む。
+        DraftBatchRecord selectedBatch;
+        await using (SqliteConnection connection = initializer.OpenConnection())
+        {
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = $"SELECT * FROM draft_batches WHERE {predicate} ORDER BY created_at DESC, identifier DESC LIMIT 1;";
+            command.Parameters.AddWithValue("$value", value);
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken))
+            {
+                return null;
+            }
+            selectedBatch = ReadDraftBatch(reader);
+        }
+        selectedBatch.Tasks = await ReadTasksAsync(
+            "tasks.draft_batch_identifier COLLATE TASK_IDENTIFIER = $value", selectedBatch.BatchIdentifier, cancellationToken);
+        PopulateDraftBatch(selectedBatch, selectedBatch.Tasks);
+        return selectedBatch;
+    }
+
+    /// <summary>所属タスクから下書きバッチの件数と対応情報を構築する。</summary>
+    private static void PopulateDraftBatch(DraftBatchRecord draftBatch, IReadOnlyList<ManagedTask> batchTasks)
+    {
+        // 一覧と単一取得で同じ件数・プロジェクト・仮参照対応を返す。
+        draftBatch.TaskCount = batchTasks.Count;
+        draftBatch.ProjectIdentifiers = batchTasks
+            .Select(task => task.ProjectIdentifier)
+            .Where(identifier => !string.IsNullOrWhiteSpace(identifier))
+            .Select(identifier => identifier!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(identifier => identifier, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        draftBatch.TaskMappings = batchTasks
+            .Where(task => !string.IsNullOrWhiteSpace(task.AiReferenceKey))
+            .Select(task => new DraftTaskMapping
+            {
+                AiReferenceKey = task.AiReferenceKey,
+                TaskIdentifier = task.Identifier
+            })
+            .ToList();
     }
 
     /// <summary>下書き保存後の検証・推薦結果をバッチへ記録する。</summary>

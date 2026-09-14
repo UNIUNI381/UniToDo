@@ -126,7 +126,7 @@ public static class Program
         await RunTestAsync("未解決プロジェクトへ低確信候補を返す", TestLowConfidenceProjectCandidatesAsync);
         await RunTestAsync("有効期間内の背景情報だけを統合する", TestProjectContextPreparationAsync);
         await RunTestAsync("毎週の既定期限を新規タスクだけへ適用する", TestProjectDeadlineDefaultAsync);
-        await RunTestAsync("プロジェクト色と作業ログを含むスキーマ版6を保持する", TestProjectSchemaVersionAsync);
+        await RunTestAsync("プロジェクト色と作業ログを含むスキーマ版7を保持する", TestProjectSchemaVersionAsync);
         await RunTestAsync("タスク操作から作業区間を自動記録する", TestTaskTimeEntryTransitionsAsync);
         await RunTestAsync("タスクと自由活動を単一タイマーで切り替える", TestFreeActivitySwitchAsync);
         await RunTestAsync("実行中ログの開始時刻を関連予定とともに修正する", TestActiveTimeEntryStartUpdateAsync);
@@ -137,6 +137,8 @@ public static class Program
         await RunTestAsync("日境界と10000件の作業時間を集計する", TestTimeReportPerformanceAsync);
         await RunTestAsync("5000件を300ミリ秒以内に評価する", TestPerformanceAsync);
         await RunTestAsync("5000件をSQLite込み300ミリ秒以内に再計算する", TestPersistentPerformanceAsync);
+        await RunTestAsync("対象限定取得と推薦差分保存を検証する", TestTargetedTaskReadsAsync);
+        await RunTestAsync("大量の完了タスクを推薦処理から除外する", TestArchivedTaskPerformanceAsync);
         Console.WriteLine($"結果: {passedCount}件成功 / {failedCount}件失敗");
         return failedCount == 0 ? 0 : 1;
     }
@@ -993,7 +995,7 @@ public static class Program
         {
             await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
             command.CommandText = """
-                DELETE FROM schema_versions WHERE version_number = 6;
+                DELETE FROM schema_versions WHERE version_number >= 6;
                 INSERT INTO history(occurred_at, event_type, summary, source) VALUES
                   ('2026-01-01', 'カレンダー同期', '2件の予定を取得しました', 'システム'),
                   ('2026-01-02', 'カレンダー同期', '2件の予定を取得しました', 'システム'),
@@ -2438,7 +2440,7 @@ public static class Program
         await using Microsoft.Data.Sqlite.SqliteCommand versionCommand = connection.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version_number) FROM schema_versions;";
         long versionNumber = Convert.ToInt64(await versionCommand.ExecuteScalarAsync());
-        Assert(versionNumber == 6, "スキーマ版6が記録されていません。");
+        Assert(versionNumber == 7, "スキーマ版7が記録されていません。");
         await using Microsoft.Data.Sqlite.SqliteCommand columnCommand = connection.CreateCommand();
         columnCommand.CommandText = "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name IN ('project_identifier', 'deadline_origin');";
         long columnCount = Convert.ToInt64(await columnCommand.ExecuteScalarAsync());
@@ -2880,6 +2882,111 @@ public static class Program
         stopwatch.Stop();
         Assert(result.Recommendation is not null, "SQLite経由の推薦が生成されませんでした。");
         Assert(stopwatch.ElapsedMilliseconds < 300, $"SQLite込み再計算に{stopwatch.ElapsedMilliseconds}ミリ秒かかりました。");
+    }
+
+    /// <summary>大文字小文字互換と依存条件を保持し推薦の不要な書き込みを防ぐ。</summary>
+    private static async Task TestTargetedTaskReadsAsync()
+    {
+        // Unicodeを含むIDと異なる表記の依存参照で索引照合を確認する。
+        await using TestDatabase database = await TestDatabase.CreateAsync();
+        ManagedTask completedTask = CreateTask("Pré-Ä", "完了前提");
+        completedTask.Status = TaskConstants.CompletedStatus;
+        ManagedTask readyTask = CreateTask("Ready-Ä", "依存解放済み");
+        readyTask.DependencyIdentifiers = ["pré-ä"];
+        ManagedTask waitingTask = CreateTask("waiting", "待機予定");
+        waitingTask.Status = TaskConstants.WaitingStatus;
+        waitingTask.DeadlineAt = StandardTime().AddHours(2);
+        waitingTask.DeadlineType = TaskConstants.TargetDeadlineType;
+        foreach (ManagedTask task in new[] { completedTask, readyTask, waitingTask })
+        {
+            await database.Repository.SaveTaskAsync(task, "テスト", TaskConstants.SystemSource);
+        }
+        ManagedTask? loaded = await database.Repository.GetTaskAsync("ready-ä");
+        Assert(loaded?.Identifier == readyTask.Identifier && loaded.DependencyIdentifiers.SequenceEqual(["pré-ä"]),
+            "単一取得でUnicodeの照合または依存関係が失われました。");
+        Assert(await database.Repository.GetTaskAsync("missing") is null, "不存在IDが取得されました。");
+        Assert((await database.Repository.GetTasksByStatusAsync(TaskConstants.WaitingStatus)).Single().Identifier == waitingTask.Identifier,
+            "状態による限定取得が不正です。");
+        RecommendationService recommendation = new(database.Repository, new CalendarAvailabilityService(), new FixedTimeProvider(StandardTime()));
+        RecommendationResult expected = recommendation.SelectRecommendation(StandardTime(),
+            await database.Repository.GetSettingsAsync(), await database.Repository.GetTasksAsync(), []);
+        RecommendationResult actual = await recommendation.RefreshAsync();
+        Assert(actual.Recommendation?.Task.Identifier == expected.Recommendation?.Task.Identifier
+            && actual.Evaluations.Select(evaluation => evaluation.PriorityScore).SequenceEqual(expected.Evaluations.Select(evaluation => evaluation.PriorityScore)),
+            "対象限定取得で推薦の順位またはスコアが変化しました。");
+        Assert(actual.CalendarWidget.Deadlines.Any(deadline => deadline.TaskIdentifier == waitingTask.Identifier),
+            "待機タスクのカレンダー期限が失われました。");
+
+        // UPDATEトリガーで同一結果の再保存がタスク行を書き換えないことを観測する。
+        await using (Microsoft.Data.Sqlite.SqliteConnection connection = database.Initializer.OpenConnection())
+        {
+            await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                CREATE TABLE evaluation_writes(identifier TEXT);
+                CREATE TRIGGER record_evaluation_write AFTER UPDATE OF suggested_minutes, priority_score, slack_minutes, recommendation_reason ON tasks
+                BEGIN INSERT INTO evaluation_writes VALUES (new.identifier); END;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+        await recommendation.RefreshAsync();
+        Assert(await CountEvaluationWritesAsync(database) == 0, "同一推薦の再計算がタスク行を書き換えました。");
+        // 一つだけ値を変え、候補から外れた場合には以前の計算値を消去する。
+        TaskEvaluation evaluation = actual.Evaluations.Single();
+        await database.Repository.SaveEvaluationsAsync([new TaskEvaluation
+        {
+            Task = evaluation.Task, PriorityScore = evaluation.PriorityScore + 1,
+            SuggestedMinutes = evaluation.SuggestedMinutes, SlackMinutes = evaluation.SlackMinutes,
+            Reason = evaluation.Reason
+        }], readyTask.Identifier, readyTask.Title, "");
+        Assert(await CountEvaluationWritesAsync(database) == 1, "変更した1行だけが更新されませんでした。");
+        await database.Repository.SaveEvaluationsAsync([], "NONE:テスト", "テスト", "");
+        Assert(await CountEvaluationWritesAsync(database) == 2, "候補から外れた1行だけが消去されませんでした。");
+        loaded = await database.Repository.GetTaskAsync(readyTask.Identifier);
+        Assert(loaded is not null && loaded.PriorityScore == 0 && loaded.SuggestedMinutes == 0
+            && loaded.SlackMinutes is null && loaded.RecommendationReason == "", "候補外の計算値が残りました。");
+    }
+
+    /// <summary>検証用トリガーが観測した計算列の書き込み件数を返す。</summary>
+    private static async Task<long> CountEvaluationWritesAsync(TestDatabase database)
+    {
+        // 件数だけを読み、更新内容や実データを出力しない。
+        await using Microsoft.Data.Sqlite.SqliteConnection connection = database.Initializer.OpenConnection();
+        await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM evaluation_writes;";
+        return Convert.ToInt64(await command.ExecuteScalarAsync());
+    }
+
+    /// <summary>完了タスクが蓄積しても推薦へ必要な行だけを読み込むことを検証する。</summary>
+    private static async Task TestArchivedTaskPerformanceAsync()
+    {
+        // 関係のない完了タスクを2万件追加し、候補1件のDB経由推薦を計測する。
+        await using TestDatabase database = await TestDatabase.CreateAsync();
+        ManagedTask candidate = CreateTask("active", "推薦候補");
+        candidate.DependencyIdentifiers = ["ARCHIVED-1"];
+        await database.Repository.SaveTaskAsync(candidate, "テスト", TaskConstants.SystemSource);
+        await using (Microsoft.Data.Sqlite.SqliteConnection connection = database.Initializer.OpenConnection())
+        {
+            await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                WITH RECURSIVE sequence(number) AS (
+                    SELECT 1 UNION ALL SELECT number + 1 FROM sequence WHERE number < 20000)
+                INSERT INTO tasks(identifier, category, title, status, deadline_type, estimated_minutes,
+                    remaining_minutes, importance, splittable, source, created_at, updated_at)
+                SELECT 'archived-' || number, '仕事', '過去タスク', '完了', 'なし', 30, 0, 3, 1,
+                    'システム', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z' FROM sequence;
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+        List<ManagedTask> recommendationTasks = await database.Repository.GetRecommendationTasksAsync();
+        Assert(recommendationTasks.Count == 2 && recommendationTasks.Any(task => task.Identifier == "archived-1"),
+            "必要な完了済み依存先だけを取得できませんでした。");
+        RecommendationService recommendation = new(database.Repository, new CalendarAvailabilityService(), new FixedTimeProvider(StandardTime()));
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        RecommendationResult result = await recommendation.RefreshAsync();
+        stopwatch.Stop();
+        Assert(result.Recommendation?.Task.Identifier == candidate.Identifier, "完了タスクの蓄積で推薦が変わりました。");
+        Assert(stopwatch.ElapsedMilliseconds < 300, $"完了2万件で再計算に{stopwatch.ElapsedMilliseconds}ミリ秒かかりました。");
+        Console.WriteLine($"完了20,000件・候補1件のDB経由再計算: {stopwatch.ElapsedMilliseconds} ms");
     }
 
     /// <summary>テスト用のタスクサービスと依存サービスを作成する。</summary>

@@ -26,6 +26,8 @@ public sealed class DatabaseInitializer(TaskManagerPaths taskManagerPaths)
         };
         SqliteConnection connection = new(connectionBuilder.ToString());
         connection.Open();
+        // IDの大文字小文字とUnicodeの比較を従来の.NET検索と一致させる。
+        connection.CreateCollation("TASK_IDENTIFIER", StringComparer.OrdinalIgnoreCase.Compare);
         using SqliteCommand configurationCommand = connection.CreateCommand();
         configurationCommand.CommandText = "PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;";
         configurationCommand.ExecuteNonQuery();
@@ -109,6 +111,16 @@ public sealed class DatabaseInitializer(TaskManagerPaths taskManagerPaths)
                 await CreateBackupAsync("schema-v6", cancellationToken);
             }
             await ApplyVersionSixAsync(cancellationToken);
+        }
+
+        if (currentVersion < 7)
+        {
+            // 対象限定検索と推薦差分更新の索引を追加する前に既存DBを退避する。
+            if (existingDatabase)
+            {
+                await CreateBackupAsync("schema-v7", cancellationToken);
+            }
+            await ApplyVersionSevenAsync(cancellationToken);
         }
 
         TaskManagerSettings defaultSettings = new();
@@ -220,6 +232,37 @@ public sealed class DatabaseInitializer(TaskManagerPaths taskManagerPaths)
             INSERT INTO schema_versions(version_number, applied_at) VALUES (6, CURRENT_TIMESTAMP);
             """;
         await versionCommand.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    /// <summary>タスクの対象限定読込と推薦差分更新の索引を追加する。</summary>
+    private async Task ApplyVersionSevenAsync(CancellationToken cancellationToken)
+    {
+        // 照合順序を揃えたID検索と、未完了・計算結果ありの部分索引を用意する。
+        await using SqliteConnection connection = OpenConnection();
+        await using SqliteTransaction transaction = connection.BeginTransaction();
+        await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            CREATE INDEX IF NOT EXISTS index_tasks_identifier_lookup
+                ON tasks(identifier COLLATE TASK_IDENTIFIER);
+            CREATE INDEX IF NOT EXISTS index_dependencies_owner_lookup
+                ON task_dependencies(task_identifier COLLATE TASK_IDENTIFIER, dependency_identifier);
+            CREATE INDEX IF NOT EXISTS index_tasks_recommendation
+                ON tasks(created_at, identifier) WHERE status NOT IN ('完了', '中止');
+            CREATE INDEX IF NOT EXISTS index_tasks_evaluated
+                ON tasks(identifier)
+                WHERE suggested_minutes <> 0 OR priority_score <> 0
+                   OR slack_minutes IS NOT NULL OR recommendation_reason <> '';
+            CREATE INDEX IF NOT EXISTS index_tasks_draft_batch_lookup
+                ON tasks(draft_batch_identifier COLLATE TASK_IDENTIFIER);
+            CREATE INDEX IF NOT EXISTS index_draft_batches_identifier_lookup
+                ON draft_batches(identifier COLLATE TASK_IDENTIFIER);
+            CREATE INDEX IF NOT EXISTS index_projects_identifier_lookup
+                ON projects(identifier COLLATE TASK_IDENTIFIER);
+            INSERT INTO schema_versions(version_number, applied_at) VALUES (7, CURRENT_TIMESTAMP);
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <summary>90日より古い操作履歴をバックアップ後に削除する。</summary>

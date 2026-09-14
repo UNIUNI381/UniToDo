@@ -190,8 +190,7 @@ public sealed class TaskService(
             {
                 return activeEntry;
             }
-            List<ManagedTask> runningTasks = (await repository.GetTasksAsync(cancellationToken))
-                .Where(task => task.Status == TaskConstants.InProgressStatus)
+            List<ManagedTask> runningTasks = (await repository.GetTasksByStatusAsync(TaskConstants.InProgressStatus, cancellationToken))
                 .OrderByDescending(task => task.UpdatedAt)
                 .ToList();
             if (runningTasks.Count == 0)

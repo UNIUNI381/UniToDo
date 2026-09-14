@@ -159,7 +159,7 @@ public sealed class AutomationWorker(
             return false;
         }
         bool taskChanged = false;
-        List<ManagedTask> tasks = await repository.GetTasksAsync(cancellationToken);
+        List<ManagedTask> tasks = await repository.GetTasksByStatusAsync(TaskConstants.InProgressStatus, cancellationToken);
         foreach (ManagedTask task in tasks.Where(task =>
             task.Status == TaskConstants.InProgressStatus
             && task.FollowUpAt.HasValue

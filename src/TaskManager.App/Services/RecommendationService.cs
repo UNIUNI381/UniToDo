@@ -18,7 +18,7 @@ public sealed class RecommendationService(
     public async Task<RecommendationResult> RefreshAsync(CancellationToken cancellationToken = default)
     {
         // タスク、設定、予定を読み込んで1件だけを選択する。
-        List<ManagedTask> tasks = await repository.GetTasksAsync(cancellationToken);
+        List<ManagedTask> tasks = await repository.GetRecommendationTasksAsync(cancellationToken);
         TaskManagerSettings settings = await repository.GetSettingsAsync(cancellationToken);
         List<CalendarEventRecord> calendarEvents = await repository.GetCalendarEventsAsync(cancellationToken);
         DateTimeOffset currentTime = clock.GetLocalNow();
