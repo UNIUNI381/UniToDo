@@ -245,8 +245,17 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
     {
         // 保存済み予定を開始日時順で返す。
         await using SqliteConnection connection = initializer.OpenConnection();
+        return await GetCalendarEventsAsync(connection, null, cancellationToken);
+    }
+
+    /// <summary>指定トランザクション内の予定キャッシュを読み込む。</summary>
+    private static async Task<List<CalendarEventRecord>> GetCalendarEventsAsync(
+        SqliteConnection connection, SqliteTransaction? transaction, CancellationToken cancellationToken)
+    {
+        // 比較と保存で同じデータベース状態を使用する。
         List<CalendarEventRecord> events = [];
         await using SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = "SELECT * FROM calendar_events ORDER BY start_at, end_at;";
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
@@ -277,45 +286,72 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
         // 古いキャッシュの削除と新しい予定の保存を一括確定する。
         await using SqliteConnection connection = initializer.OpenConnection();
         await using SqliteTransaction transaction = connection.BeginTransaction();
-        await using (SqliteCommand deleteCommand = connection.CreateCommand())
+        List<CalendarEventRecord> previousEvents = await GetCalendarEventsAsync(connection, transaction, cancellationToken);
+        bool eventsChanged = !previousEvents.OrderBy(CalendarEventKey).Select(CalendarEventValue)
+            .SequenceEqual(events.OrderBy(CalendarEventKey).Select(CalendarEventValue));
+        string? previousError = await GetStateAsync(connection, transaction, "calendar_error", cancellationToken);
+        if (eventsChanged)
         {
-            deleteCommand.Transaction = transaction;
-            deleteCommand.CommandText = "DELETE FROM calendar_events;";
-            await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
-        }
-        foreach (CalendarEventRecord calendarEvent in events)
-        {
-            await using SqliteCommand insertCommand = connection.CreateCommand();
-            insertCommand.Transaction = transaction;
-            insertCommand.CommandText = """
-                INSERT INTO calendar_events(
-                    event_identifier, calendar_identifier, title, description, start_at, end_at,
-                    location, is_all_day, is_busy, external_updated_at)
-                VALUES ($eventIdentifier, $calendarIdentifier, $title, $description, $startAt, $endAt,
-                    $location, $isAllDay, $isBusy, $externalUpdatedAt);
-                """;
-            insertCommand.Parameters.AddWithValue("$eventIdentifier", calendarEvent.EventIdentifier);
-            insertCommand.Parameters.AddWithValue("$calendarIdentifier", calendarEvent.CalendarIdentifier);
-            insertCommand.Parameters.AddWithValue("$title", calendarEvent.Title);
-            insertCommand.Parameters.AddWithValue("$description", calendarEvent.Description);
-            insertCommand.Parameters.AddWithValue("$startAt", FormatDate(calendarEvent.StartAt));
-            insertCommand.Parameters.AddWithValue("$endAt", FormatDate(calendarEvent.EndAt));
-            insertCommand.Parameters.AddWithValue("$location", calendarEvent.Location);
-            insertCommand.Parameters.AddWithValue("$isAllDay", calendarEvent.IsAllDay ? 1 : 0);
-            insertCommand.Parameters.AddWithValue("$isBusy", calendarEvent.IsBusy ? 1 : 0);
-            insertCommand.Parameters.AddWithValue("$externalUpdatedAt", ToDatabaseValue(calendarEvent.ExternalUpdatedAt));
-            await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+            await using (SqliteCommand deleteCommand = connection.CreateCommand())
+            {
+                deleteCommand.Transaction = transaction;
+                deleteCommand.CommandText = "DELETE FROM calendar_events;";
+                await deleteCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
+            foreach (CalendarEventRecord calendarEvent in events)
+            {
+                await using SqliteCommand insertCommand = connection.CreateCommand();
+                insertCommand.Transaction = transaction;
+                insertCommand.CommandText = """
+                    INSERT INTO calendar_events(
+                        event_identifier, calendar_identifier, title, description, start_at, end_at,
+                        location, is_all_day, is_busy, external_updated_at)
+                    VALUES ($eventIdentifier, $calendarIdentifier, $title, $description, $startAt, $endAt,
+                        $location, $isAllDay, $isBusy, $externalUpdatedAt);
+                    """;
+                insertCommand.Parameters.AddWithValue("$eventIdentifier", calendarEvent.EventIdentifier);
+                insertCommand.Parameters.AddWithValue("$calendarIdentifier", calendarEvent.CalendarIdentifier);
+                insertCommand.Parameters.AddWithValue("$title", calendarEvent.Title);
+                insertCommand.Parameters.AddWithValue("$description", calendarEvent.Description);
+                insertCommand.Parameters.AddWithValue("$startAt", FormatDate(calendarEvent.StartAt));
+                insertCommand.Parameters.AddWithValue("$endAt", FormatDate(calendarEvent.EndAt));
+                insertCommand.Parameters.AddWithValue("$location", calendarEvent.Location);
+                insertCommand.Parameters.AddWithValue("$isAllDay", calendarEvent.IsAllDay ? 1 : 0);
+                insertCommand.Parameters.AddWithValue("$isBusy", calendarEvent.IsBusy ? 1 : 0);
+                insertCommand.Parameters.AddWithValue("$externalUpdatedAt", ToDatabaseValue(calendarEvent.ExternalUpdatedAt));
+                await insertCommand.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
         await SetStateAsync(connection, transaction, "calendar_updated_at", FormatDate(synchronizedAt), cancellationToken);
         await SetStateAsync(connection, transaction, "calendar_error", string.Empty, cancellationToken);
-        await InsertHistoryAsync(connection, transaction, new HistoryRecord
+        if (eventsChanged || !string.IsNullOrEmpty(previousError))
         {
-            OccurredAt = synchronizedAt,
-            EventType = "カレンダー同期",
-            Summary = $"{events.Count}件の予定を取得しました",
-            Source = TaskConstants.SystemSource
-        }, cancellationToken);
+            await InsertHistoryAsync(connection, transaction, new HistoryRecord
+            {
+                OccurredAt = synchronizedAt,
+                EventType = "カレンダー同期",
+                Summary = eventsChanged ? $"{events.Count}件の予定キャッシュを更新しました" : "カレンダー同期が復旧しました",
+                Source = TaskConstants.SystemSource
+            }, cancellationToken);
+        }
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>予定の並べ替えに使う複合識別子を返す。</summary>
+    private static (string Calendar, string Event) CalendarEventKey(CalendarEventRecord calendarEvent)
+    {
+        // 同時刻の予定や取得順序の違いを識別子で正規化する。
+        return (calendarEvent.CalendarIdentifier, calendarEvent.EventIdentifier);
+    }
+
+    /// <summary>予定の全保存項目を比較可能な値として返す。</summary>
+    private static object CalendarEventValue(CalendarEventRecord calendarEvent)
+    {
+        // 日時は絶対時刻で比較し、外部更新日時だけの変化も検出する。
+        return (calendarEvent.CalendarIdentifier, calendarEvent.EventIdentifier,
+            calendarEvent.Title, calendarEvent.Description, calendarEvent.StartAt,
+            calendarEvent.EndAt, calendarEvent.Location, calendarEvent.IsAllDay,
+            calendarEvent.IsBusy, calendarEvent.ExternalUpdatedAt);
     }
 
     /// <summary>カレンダー同期エラーを状態として保存する。</summary>
@@ -324,6 +360,11 @@ public sealed class TaskRepository(DatabaseInitializer databaseInitializer)
         // キャッシュを消さずに最新エラーだけを更新する。
         await using SqliteConnection connection = initializer.OpenConnection();
         await using SqliteTransaction transaction = connection.BeginTransaction();
+        string? previousError = await GetStateAsync(connection, transaction, "calendar_error", cancellationToken);
+        if (string.Equals(previousError ?? string.Empty, errorMessage, StringComparison.Ordinal))
+        {
+            return;
+        }
         await SetStateAsync(connection, transaction, "calendar_error", errorMessage, cancellationToken);
         await InsertHistoryAsync(connection, transaction, new HistoryRecord
         {

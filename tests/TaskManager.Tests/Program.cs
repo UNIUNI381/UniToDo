@@ -83,6 +83,8 @@ public static class Program
         await RunTestAsync("今日から7日分のウィジェット予定を抽出する", TestCalendarWidgetProjectionAsync);
         await RunTestAsync("Google Calendar埋め込みURLを安全に保存する", TestCalendarEmbedUrlAsync);
         await RunTestAsync("同期エラー時もカレンダーキャッシュを表示する", TestCalendarCacheOnErrorAsync);
+        await RunTestAsync("カレンダー履歴は変更時だけ保存する", TestCalendarHistoryChangesAsync);
+        await RunTestAsync("旧同期ログの移行とバックアップを検証する", TestCalendarHistoryMigrationAsync);
         await RunTestAsync("CodexタスクIDとディープリンクを正規化する", TestCodexThreadIdentifierAsync);
         await RunTestAsync("CodexタスクをURLプロトコルだけで開く", TestCodexDeepLinkLaunchAsync);
         await RunTestAsync("Codex送信先設定をSQLiteで保持する", TestCodexSettingsRoundTripAsync);
@@ -123,7 +125,7 @@ public static class Program
         await RunTestAsync("未解決プロジェクトへ低確信候補を返す", TestLowConfidenceProjectCandidatesAsync);
         await RunTestAsync("有効期間内の背景情報だけを統合する", TestProjectContextPreparationAsync);
         await RunTestAsync("毎週の既定期限を新規タスクだけへ適用する", TestProjectDeadlineDefaultAsync);
-        await RunTestAsync("プロジェクト色と作業ログを含むスキーマ版5を保持する", TestProjectSchemaVersionAsync);
+        await RunTestAsync("プロジェクト色と作業ログを含むスキーマ版6を保持する", TestProjectSchemaVersionAsync);
         await RunTestAsync("タスク操作から作業区間を自動記録する", TestTaskTimeEntryTransitionsAsync);
         await RunTestAsync("タスクと自由活動を単一タイマーで切り替える", TestFreeActivitySwitchAsync);
         await RunTestAsync("実行中ログの開始時刻を関連予定とともに修正する", TestActiveTimeEntryStartUpdateAsync);
@@ -940,6 +942,80 @@ public static class Program
         Assert(
             errorResult.CalendarWidget.Events.Single().EventIdentifier == cachedEvent.EventIdentifier,
             "同期エラー後にカレンダーキャッシュがウィジェットから失われました。");
+    }
+
+    /// <summary>同じ予定の再取得を抑止し変更・削除・エラー遷移を記録する。</summary>
+    private static async Task TestCalendarHistoryChangesAsync()
+    {
+        // 空の同期と順序の違う再取得でも最終成功日時だけは更新する。
+        await using TestDatabase database = await TestDatabase.CreateAsync();
+        DateTimeOffset currentTime = StandardTime();
+        await database.Repository.ReplaceCalendarEventsAsync([], currentTime);
+        Assert((await database.Repository.GetHistoryAsync(100)).Count == 0, "空の同期で履歴が増えました。");
+        CalendarEventRecord firstEvent = new()
+        {
+            EventIdentifier = "first", CalendarIdentifier = "primary", Title = "予定",
+            StartAt = currentTime, EndAt = currentTime.AddHours(1)
+        };
+        CalendarEventRecord secondEvent = new()
+        {
+            EventIdentifier = "second", CalendarIdentifier = "primary",
+            StartAt = currentTime, EndAt = currentTime.AddHours(1)
+        };
+        await database.Repository.ReplaceCalendarEventsAsync([firstEvent, secondEvent], currentTime);
+        await database.Repository.ReplaceCalendarEventsAsync([secondEvent, firstEvent], currentTime.AddMinutes(5));
+        Assert((await database.Repository.GetHistoryAsync(100)).Count == 1, "順序だけの違いで履歴が増えました。");
+        Assert(DateTimeOffset.Parse((await database.Repository.GetStateAsync("calendar_updated_at"))!) == currentTime.AddMinutes(5),
+            "変更なし同期の成功日時が更新されませんでした。");
+
+        // 同件数の内容変更、外部更新日時だけの変更、削除を検出する。
+        firstEvent.Title = "変更後";
+        await database.Repository.ReplaceCalendarEventsAsync([firstEvent, secondEvent], currentTime);
+        firstEvent.ExternalUpdatedAt = currentTime;
+        await database.Repository.ReplaceCalendarEventsAsync([firstEvent, secondEvent], currentTime);
+        await database.Repository.ReplaceCalendarEventsAsync([], currentTime);
+        Assert((await database.Repository.GetHistoryAsync(100)).Count == 4, "予定の変更または削除が記録されませんでした。");
+        await database.Repository.SaveCalendarErrorAsync("失敗");
+        await database.Repository.SaveCalendarErrorAsync("失敗");
+        await database.Repository.SaveCalendarErrorAsync("別の失敗");
+        await database.Repository.ReplaceCalendarEventsAsync([], currentTime);
+        await database.Repository.ReplaceCalendarEventsAsync([], currentTime);
+        Assert((await database.Repository.GetHistoryAsync(100)).Count == 7, "エラーの重複抑止または復旧記録が不正です。");
+    }
+
+    /// <summary>旧版ログの整理が他の履歴を保持し復元用バックアップを作ることを検証する。</summary>
+    private static async Task TestCalendarHistoryMigrationAsync()
+    {
+        // 版5の旧同期ログと保持対象を用意する。
+        await using TestDatabase database = await TestDatabase.CreateAsync();
+        await using (Microsoft.Data.Sqlite.SqliteConnection connection = database.Initializer.OpenConnection())
+        {
+            await using Microsoft.Data.Sqlite.SqliteCommand command = connection.CreateCommand();
+            command.CommandText = """
+                DELETE FROM schema_versions WHERE version_number = 6;
+                INSERT INTO history(occurred_at, event_type, summary, source) VALUES
+                  ('2026-01-01', 'カレンダー同期', '2件の予定を取得しました', 'システム'),
+                  ('2026-01-02', 'カレンダー同期', '2件の予定を取得しました', 'システム'),
+                  ('2026-01-03', 'カレンダー同期', '3件の予定を取得しました', 'システム'),
+                  ('2026-01-04', 'カレンダーエラー', '失敗', 'システム'),
+                  ('2026-01-05', '更新', 'タスク更新', 'システム');
+                """;
+            await command.ExecuteNonQueryAsync();
+        }
+        await database.Initializer.InitializeAsync();
+        List<HistoryRecord> history = await database.Repository.GetHistoryAsync(100);
+        Assert(history.Count == 3 && history.Single(record => record.EventType == "カレンダー同期").Summary.StartsWith("3", StringComparison.Ordinal),
+            "旧ログ整理で最新同期または他の履歴が失われました。");
+        string backupPath = Directory.GetFiles(database.Paths.BackupDirectory, "*schema-v6.db").Single();
+        await using (Microsoft.Data.Sqlite.SqliteConnection backup = new($"Data Source={backupPath};Mode=ReadOnly"))
+        {
+            await backup.OpenAsync();
+            await using Microsoft.Data.Sqlite.SqliteCommand command = backup.CreateCommand();
+            command.CommandText = "SELECT COUNT(*) FROM history;";
+            Assert(Convert.ToInt64(await command.ExecuteScalarAsync()) == 5, "バックアップから旧履歴を復元できません。");
+        }
+        await database.Initializer.InitializeAsync();
+        Assert((await database.Repository.GetHistoryAsync(100)).Count == 3, "再初期化で履歴が変化しました。");
     }
 
     /// <summary>CodexタスクIDとディープリンクの正規化を検証する。</summary>
@@ -2296,7 +2372,7 @@ public static class Program
         await using Microsoft.Data.Sqlite.SqliteCommand versionCommand = connection.CreateCommand();
         versionCommand.CommandText = "SELECT MAX(version_number) FROM schema_versions;";
         long versionNumber = Convert.ToInt64(await versionCommand.ExecuteScalarAsync());
-        Assert(versionNumber == 5, "スキーマ版5が記録されていません。");
+        Assert(versionNumber == 6, "スキーマ版6が記録されていません。");
         await using Microsoft.Data.Sqlite.SqliteCommand columnCommand = connection.CreateCommand();
         columnCommand.CommandText = "SELECT COUNT(*) FROM pragma_table_info('tasks') WHERE name IN ('project_identifier', 'deadline_origin');";
         long columnCount = Convert.ToInt64(await columnCommand.ExecuteScalarAsync());

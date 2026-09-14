@@ -101,6 +101,16 @@ public sealed class DatabaseInitializer(TaskManagerPaths taskManagerPaths)
             await ApplyVersionFiveAsync(cancellationToken);
         }
 
+        if (currentVersion < 6)
+        {
+            // 旧同期ログを整理する前に、復元可能なSQLiteバックアップを保存する。
+            if (existingDatabase)
+            {
+                await CreateBackupAsync("schema-v6", cancellationToken);
+            }
+            await ApplyVersionSixAsync(cancellationToken);
+        }
+
         TaskManagerSettings defaultSettings = new();
         Dictionary<string, string> settingValues = TaskRepository.SerializeSettings(defaultSettings);
         await using SqliteConnection settingsConnection = OpenConnection();
@@ -179,6 +189,37 @@ public sealed class DatabaseInitializer(TaskManagerPaths taskManagerPaths)
         migrationCommand.CommandText = VersionFiveMigrationSql;
         await migrationCommand.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>旧同期ログを整理してデータベースの空き領域を回収する。</summary>
+    private async Task ApplyVersionSixAsync(CancellationToken cancellationToken)
+    {
+        // 変更内容を持たない旧形式の正常同期ログだけを最新1件に絞る。
+        await using SqliteConnection connection = OpenConnection();
+        await using (SqliteCommand cleanupCommand = connection.CreateCommand())
+        {
+            cleanupCommand.CommandText = """
+                DELETE FROM history
+                WHERE event_type = 'カレンダー同期' AND source = 'システム'
+                  AND details = '' AND summary GLOB '[0-9]*件の予定を取得しました'
+                  AND identifier <> (
+                    SELECT identifier FROM history
+                    WHERE event_type = 'カレンダー同期' AND source = 'システム'
+                      AND details = '' AND summary GLOB '[0-9]*件の予定を取得しました'
+                    ORDER BY occurred_at DESC, identifier DESC LIMIT 1);
+                """;
+            await cleanupCommand.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        // VACUUMはトランザクション外で実行し、完了後だけ版を記録して失敗時に再試行する。
+        await using SqliteCommand compactCommand = connection.CreateCommand();
+        compactCommand.CommandText = "VACUUM; PRAGMA wal_checkpoint(TRUNCATE);";
+        await compactCommand.ExecuteNonQueryAsync(cancellationToken);
+        await using SqliteCommand versionCommand = connection.CreateCommand();
+        versionCommand.CommandText = """
+            INSERT INTO schema_versions(version_number, applied_at) VALUES (6, CURRENT_TIMESTAMP);
+            """;
+        await versionCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
     /// <summary>SQLiteのオンラインバックアップを作成して古い世代を整理する。</summary>
