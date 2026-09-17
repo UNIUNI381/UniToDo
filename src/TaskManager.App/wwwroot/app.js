@@ -538,6 +538,8 @@ function buildDashboardRecommendationQuery() {
     queryParameters.set("category", selectedValue.slice("category:".length));
   } else if (selectedValue.startsWith("project:")) {
     queryParameters.set("projectIdentifier", selectedValue.slice("project:".length));
+  } else if (selectedValue === unassignedProjectFilterValue) {
+    queryParameters.set("unassignedProject", "true");
   }
   if (applicationState.forceRecommendationDisplay) {
     queryParameters.set("forceRecommendation", "true");
@@ -2661,6 +2663,7 @@ function populateProjectSelectors() {
     { value: "", label: "すべて", color: null },
     { value: "category:仕事", label: "仕事", color: null },
     { value: "category:私用", label: "私用", color: null },
+    { value: unassignedProjectFilterValue, label: "プロジェクト未設定", color: getProjectColor(null) },
     ...applicationState.projects.map(function createDashboardProjectOption(project) {
       return {
         value: `project:${project.identifier}`,

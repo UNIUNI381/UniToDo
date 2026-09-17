@@ -210,31 +210,37 @@ public static class ApiEndpoints
         TimeEntryRepository timeEntryRepository,
         [FromQuery] string? category,
         [FromQuery] string? projectIdentifier,
+        [FromQuery] bool? unassignedProject,
         [FromQuery] bool? forceRecommendation,
         CancellationToken cancellationToken)
     {
-        // 区分とプロジェクトは排他的な表示条件として受け付ける。
+        // 区分、プロジェクト、プロジェクト未設定は排他的な表示条件として受け付ける。
         if (!string.IsNullOrWhiteSpace(category)
             && category is not TaskConstants.WorkCategory and not TaskConstants.PrivateCategory)
         {
             return Results.BadRequest(new { error = "区分は仕事または私用を指定してください。" });
         }
-        if (!string.IsNullOrWhiteSpace(category) && !string.IsNullOrWhiteSpace(projectIdentifier))
+        int scopeCount = Convert.ToInt32(!string.IsNullOrWhiteSpace(category))
+            + Convert.ToInt32(!string.IsNullOrWhiteSpace(projectIdentifier))
+            + Convert.ToInt32(unassignedProject == true);
+        if (scopeCount > 1)
         {
-            return Results.BadRequest(new { error = "区分とプロジェクトは同時に指定できません。" });
+            return Results.BadRequest(new { error = "区分、プロジェクト、プロジェクト未設定は同時に指定できません。" });
         }
 
         // 全件の推薦再計算後に表示範囲を適用し、保存済み優先度へ影響させない。
         RecommendationResult result = await recommendationService.RefreshAsync(cancellationToken);
         if (!string.IsNullOrWhiteSpace(category)
             || !string.IsNullOrWhiteSpace(projectIdentifier)
+            || unassignedProject == true
             || forceRecommendation == true)
         {
             result = RecommendationService.FilterRecommendation(
                 result,
                 category,
                 projectIdentifier,
-                forceRecommendation == true);
+                forceRecommendation == true,
+                unassignedProject == true);
         }
         result.ActiveTimeEntry = await timeEntryRepository.GetActiveAsync(cancellationToken);
         result.ReviewTimeEntries = await timeEntryRepository.GetNeedsReviewAsync(cancellationToken);

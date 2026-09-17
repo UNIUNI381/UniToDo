@@ -50,12 +50,13 @@ public sealed class RecommendationService(
         };
     }
 
-    /// <summary>計算済み候補を区分またはプロジェクトで絞り、範囲内の最上位を返す。</summary>
+    /// <summary>計算済み候補を区分またはプロジェクト設定状態で絞り、範囲内の最上位を返す。</summary>
     public static RecommendationResult FilterRecommendation(
         RecommendationResult sourceResult,
         string? category,
         string? projectIdentifier,
-        bool forceDisplay = false)
+        bool forceDisplay = false,
+        bool unassignedProject = false)
     {
         // 全タスクで算出済みの優先度を維持したまま、画面指定の範囲だけを比較する。
         IEnumerable<TaskEvaluation> filteredEvaluations = sourceResult.Evaluations;
@@ -71,6 +72,11 @@ public sealed class RecommendationService(
                     evaluation.Task.ProjectIdentifier,
                     projectIdentifier,
                     StringComparison.OrdinalIgnoreCase));
+        }
+        if (unassignedProject)
+        {
+            filteredEvaluations = filteredEvaluations.Where(evaluation =>
+                string.IsNullOrWhiteSpace(evaluation.Task.ProjectIdentifier));
         }
         List<TaskEvaluation> matchingEvaluations = filteredEvaluations.ToList();
 

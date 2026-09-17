@@ -68,7 +68,7 @@ public static class Program
         await RunTestAsync("最後の前提完了時に後続タスクの開始可能日を更新する", TestDependencyReleaseStartAsync);
         await RunTestAsync("必要環境の不一致では推薦候補から除外しない", TestRequiredContextDoesNotExcludeAsync);
         await RunTestAsync("開始可能日からの経過と重要度を優先度へ反映する", TestAgingPriorityAsync);
-        await RunTestAsync("ダッシュボード推薦を区分とプロジェクトで絞り込む", TestDashboardRecommendationFilterAsync);
+        await RunTestAsync("ダッシュボード推薦を区分とプロジェクト設定状態で絞り込む", TestDashboardRecommendationFilterAsync);
         await RunTestAsync("実行中タスクを原則継続する", TestContinuityAsync);
         await RunTestAsync("厳守期限不足を割り込ませる", TestStrictDeadlineInterruptionAsync);
         await RunTestAsync("締切集中時は先の期限群を優先する", TestCumulativeDeadlinePressureAsync);
@@ -556,7 +556,7 @@ public static class Program
         return Task.CompletedTask;
     }
 
-    /// <summary>計算済み推薦を区分とプロジェクトで絞り込めることを検証する。</summary>
+    /// <summary>計算済み推薦を区分とプロジェクト設定状態で絞り込めることを検証する。</summary>
     private static Task TestDashboardRecommendationFilterAsync()
     {
         // 全体順位と異なる範囲でも、範囲内の最大スコアが選ばれることを確認する。
@@ -569,13 +569,17 @@ public static class Program
         ManagedTask projectTask = CreateTask("dashboard-project", "同一プロジェクト候補");
         projectTask.Category = TaskConstants.WorkCategory;
         projectTask.ProjectIdentifier = "PROJECT-PRIVATE";
+        ManagedTask unassignedTask = CreateTask("dashboard-unassigned", "プロジェクト未設定候補");
+        unassignedTask.Category = TaskConstants.PrivateCategory;
+        unassignedTask.ProjectIdentifier = null;
         TaskEvaluation workEvaluation = new() { Task = workTask, PriorityScore = 80, SuggestedMinutes = 30 };
         TaskEvaluation privateEvaluation = new() { Task = privateTask, PriorityScore = 90, SuggestedMinutes = 30 };
         TaskEvaluation projectEvaluation = new() { Task = projectTask, PriorityScore = 70, SuggestedMinutes = 30 };
+        TaskEvaluation unassignedEvaluation = new() { Task = unassignedTask, PriorityScore = 85, SuggestedMinutes = 30 };
         RecommendationResult sourceResult = new()
         {
             Recommendation = privateEvaluation,
-            Evaluations = [workEvaluation, privateEvaluation, projectEvaluation],
+            Evaluations = [workEvaluation, privateEvaluation, projectEvaluation, unassignedEvaluation],
             CurrentSlot = new AvailableSlot(60, string.Empty, string.Empty, string.Empty, StandardTime().AddMinutes(60))
         };
 
@@ -591,10 +595,17 @@ public static class Program
             sourceResult,
             null,
             "PROJECT-NONE");
+        RecommendationResult unassignedResult = RecommendationService.FilterRecommendation(
+            sourceResult,
+            null,
+            null,
+            unassignedProject: true);
 
         Assert(workResult.Recommendation?.Task.Identifier == workTask.Identifier, "仕事内の最上位が選ばれませんでした。");
         Assert(projectResult.Recommendation?.Task.Identifier == privateTask.Identifier, "プロジェクト内の最上位が選ばれませんでした。");
         Assert(emptyResult.Recommendation is null, "候補なしの範囲で推薦が生成されました。");
+        Assert(unassignedResult.Recommendation?.Task.Identifier == unassignedTask.Identifier, "プロジェクト未設定の候補が選ばれませんでした。");
+        Assert(unassignedResult.Evaluations.Count == 1, "プロジェクト設定済みの候補が未設定範囲へ混在しました。");
         Assert(sourceResult.Recommendation?.Task.Identifier == privateTask.Identifier, "元の全体推薦が変更されました。");
         return Task.CompletedTask;
     }
