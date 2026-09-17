@@ -403,6 +403,13 @@ dialog::backdrop { background: rgba(12,25,18,.52); backdrop-filter: blur(3px); }
 }
 
 @media (max-width: 680px) {
+  /* ダッシュボードの絞り込み候補を本文幅に収め、長いプロジェクト名は欄内で折り返す。 */
+  #view-dashboard .header-actions { width: 100%; justify-content: flex-start; }
+  .dashboard-filter-control { flex: 1 0 100%; width: 100%; min-width: 0; }
+  .dashboard-filter-control .project-filter-menu { right: 0; left: 0; width: 100%; min-width: 0; max-width: 100%; }
+  .dashboard-filter-control .project-filter-option { align-items: flex-start; white-space: normal; }
+  .dashboard-filter-control .project-filter-option > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+  #dashboard-recommendation-filter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .task-toolbar { flex-wrap: wrap; }
   .task-toolbar > input[type="search"] { flex-basis: 100%; }
 }
