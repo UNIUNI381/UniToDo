@@ -360,6 +360,8 @@ public static class ApiEndpoints
         [FromQuery] string? projectIdentifier,
         [FromQuery] string? taskIdentifier,
         [FromQuery] bool? includeVoided,
+        [FromQuery] string? category,
+        [FromQuery] bool? includePrivate,
         CancellationToken cancellationToken)
     {
         // 期間・プロジェクト・タスク・無効化済み条件を保存層へ渡す。
@@ -369,7 +371,9 @@ public static class ApiEndpoints
             projectIdentifier,
             taskIdentifier,
             includeVoided.GetValueOrDefault(),
-            cancellationToken));
+            cancellationToken,
+            category,
+            includePrivate ?? true));
     }
 
     /// <summary>現在実行中の作業ログを返す。</summary>
@@ -509,6 +513,8 @@ public static class ApiEndpoints
         [FromQuery] string? period,
         [FromQuery] DateOnly? anchor,
         [FromQuery] string? projectIdentifier,
+        [FromQuery] string? category,
+        [FromQuery] bool? includePrivate,
         CancellationToken cancellationToken)
     {
         // 未指定期間は日表示として集計する。
@@ -516,7 +522,9 @@ public static class ApiEndpoints
             string.IsNullOrWhiteSpace(period) ? "day" : period,
             anchor,
             projectIdentifier,
-            cancellationToken));
+            cancellationToken,
+            category,
+            includePrivate ?? true));
     }
 
     /// <summary>条件に一致するプロジェクト一覧を返す。</summary>

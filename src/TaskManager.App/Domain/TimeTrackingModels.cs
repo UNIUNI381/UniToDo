@@ -3,6 +3,8 @@ namespace TaskManager.Domain;
 /// <summary>1回の作業時間ログを表す。</summary>
 public sealed class TimeEntryRecord
 {
+    // 関連タスクの現在区分を保持し、自由活動は仕事として扱う。
+    public string Category { get; set; } = TaskConstants.WorkCategory;
     // 作業区間、関連先、警告・確認状態を保持する。
     public string Identifier { get; set; } = string.Empty;
     public string? TaskIdentifier { get; set; }
@@ -136,6 +138,7 @@ public static class TimeTrackingConstants
     public const string AutomaticTimeoutStopReason = "auto-timeout";
     public const string VoidedStopReason = "voided";
     public const string UnassignedProjectIdentifier = "__unassigned__";
+    public const string UnassignedPrivateProjectIdentifier = "__unassigned_private__";
     public const string FreeActivityTaskIdentifier = "__free__";
     public const int WarningGraceMinutes = 60;
 }

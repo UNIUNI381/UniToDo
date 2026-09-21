@@ -19,7 +19,9 @@ public sealed class TimeReportService(
         string period,
         DateOnly? anchorDate,
         string? projectIdentifier,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? category = null,
+        bool includePrivate = true)
     {
         // 設定タイムゾーンで集計範囲と時間枠を決定する。
         string normalizedPeriod = period.Trim().ToLowerInvariant();
@@ -39,7 +41,9 @@ public sealed class TimeReportService(
             rangeEnd,
             projectIdentifier,
             includeVoided: false,
-            cancellationToken: cancellationToken);
+            cancellationToken: cancellationToken,
+            category: category,
+            includePrivate: includePrivate);
 
         // 実行中ログは現在時刻までとし、範囲外部分を切り詰めて集計する。
         List<EffectiveTimeEntry> effectiveEntries = entries
@@ -293,7 +297,9 @@ public sealed class TimeReportService(
     {
         // NULLや空文字は固定の未割当識別子へ統一する。
         return string.IsNullOrWhiteSpace(entry.ProjectIdentifier)
-            ? TimeTrackingConstants.UnassignedProjectIdentifier
+            ? entry.Category == TaskConstants.PrivateCategory
+                ? TimeTrackingConstants.UnassignedPrivateProjectIdentifier
+                : TimeTrackingConstants.UnassignedProjectIdentifier
             : entry.ProjectIdentifier;
     }
 
@@ -301,9 +307,9 @@ public sealed class TimeReportService(
     private static string GetProjectName(TimeEntryRecord entry)
     {
         // 保存時点の名称がないログは未割当として表示する。
-        return string.IsNullOrWhiteSpace(entry.ProjectNameSnapshot)
-            ? "未割当"
-            : entry.ProjectNameSnapshot;
+        return string.IsNullOrWhiteSpace(entry.ProjectIdentifier)
+            ? $"未設定（{entry.Category}）"
+            : string.IsNullOrWhiteSpace(entry.ProjectNameSnapshot) ? "未設定" : entry.ProjectNameSnapshot;
     }
 
     /// <summary>半開区間の秒数を負数にならない形で返す。</summary>

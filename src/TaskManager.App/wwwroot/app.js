@@ -57,7 +57,7 @@ const taskStatuses = ["受信箱", "下書き", "要確認", "実行可能", "�
 // プロジェクト未設定だけを絞り込む選択値を保持する。
 const unassignedProjectFilterValue = "__unassigned_project__";
 
-// 作業時間APIでプロジェクト未割当だけを絞り込む選択値を保持する。
+// 作業時間APIでプロジェクト未設定だけを絞り込む選択値を保持する。
 const unassignedTimeProjectFilterValue = "__unassigned__";
 
 // タスク区分だけを絞り込む選択値の接頭辞を保持する。
@@ -987,7 +987,7 @@ function buildTimeEntryTooltip(timeEntry) {
   const endText = timeEntry.endAt ? formatDateTime(timeEntry.endAt) : "実行中";
   return [
     timeEntry.title,
-    timeEntry.projectNameSnapshot || "プロジェクト未割当",
+    timeEntry.projectNameSnapshot || "プロジェクト未設定",
     `${formatDateTime(timeEntry.startAt)} ～ ${endText}`,
     timeEntry.needsReview ? "要確認" : ""
   ].filter(Boolean).join("\n");
@@ -995,7 +995,8 @@ function buildTimeEntryTooltip(timeEntry) {
 
 /** プロジェクトIDから保存済みの表示色を返す。 */
 function getProjectColor(projectIdentifier) {
-  // 未割当または取得できないプロジェクトは共通グレーへ統一する。
+  // 未設定または取得できないプロジェクトは共通グレーへ統一する。
+  if (projectIdentifier === "__unassigned_private__") return "#c5ccc7";
   if (!projectIdentifier) return "#a7b0aa";
   const project = findProject(projectIdentifier);
   if (!project) return "#a7b0aa";
@@ -1072,7 +1073,7 @@ function buildCalendarEventTooltip(calendarEvent) {
 function buildTaskDeadlineTooltip(taskDeadline) {
   // プロジェクト、名称、期限種別、状態を改行区切りで返す。
   const project = findProject(taskDeadline.projectIdentifier);
-  const projectName = project?.canonicalName || "プロジェクト未割当";
+  const projectName = project?.canonicalName || "プロジェクト未設定";
   return [
     projectName,
     taskDeadline.title,
@@ -1244,7 +1245,7 @@ function renderTimeTracker(activeTimeEntry) {
     panel.innerHTML = `
       <div class="time-tracker-main">
         <strong>${escapeHtml(activeTimeEntry.title)}</strong>
-        <span>${escapeHtml(activeTimeEntry.projectNameSnapshot || "プロジェクト未割当")}</span>
+        <span>${escapeHtml(activeTimeEntry.projectNameSnapshot || "プロジェクト未設定")}</span>
         <span class="time-tracker-running" data-time-entry-elapsed="${escapeAttribute(activeTimeEntry.startAt)}">計測中</span>
         ${warningActive ? `<span>長時間継続しています。1時間延長するか停止してください。</span>` : ""}
       </div>
@@ -2646,7 +2647,9 @@ function populateProjectSelectors() {
   const timeProjectFilter = document.getElementById("time-project-filter");
   const currentTimeProject = timeProjectFilter.value;
   timeProjectFilter.innerHTML = `<option value="">すべてのプロジェクト</option>
-    <option value="${unassignedTimeProjectFilterValue}">未割当</option>`;
+    <option value="${taskCategoryFilterPrefix}仕事">仕事</option>
+    <option value="${taskCategoryFilterPrefix}私用">私用</option>
+    <option value="${unassignedTimeProjectFilterValue}">未設定</option>`;
   for (const project of applicationState.projects) {
     const optionLabel = `${project.canonicalName}${project.status === "アーカイブ" ? "（アーカイブ）" : ""}`;
     timeProjectFilter.insertAdjacentHTML(
@@ -2682,7 +2685,7 @@ function populateProjectSelectors() {
   const timeProjectSelectors = [document.querySelector("#time-entry-form [name='projectIdentifier']")].filter(Boolean);
   for (const selector of timeProjectSelectors) {
     const currentValue = selector.value;
-    selector.innerHTML = `<option value="">未割当</option>`;
+    selector.innerHTML = `<option value="">未設定</option>`;
     for (const project of applicationState.projects) {
       const optionLabel = `${project.canonicalName}${project.status === "アーカイブ" ? "（アーカイブ）" : ""}`;
       const projectColor = getProjectColor(project.identifier);
@@ -2697,7 +2700,7 @@ function populateProjectSelectors() {
   const freeActivityProjectSelect = document.getElementById("free-activity-project");
   const currentFreeActivityProject = freeActivityProjectSelect.value;
   const freeActivityProjectOptions = [
-    { value: "", label: "未割当", color: getProjectColor(null) },
+    { value: "", label: "未設定", color: getProjectColor(null) },
     ...applicationState.projects.map(function createFreeActivityProjectOption(project) {
       return {
         value: project.identifier,
@@ -2737,7 +2740,9 @@ function renderTimeProjectFilterOptions() {
   // プロジェクト色はドットだけへ適用して名称を通常の文字色で表示する。
   const options = [
     { value: "", label: "すべてのプロジェクト", color: null },
-    { value: unassignedTimeProjectFilterValue, label: "未割当", color: getProjectColor(null) },
+    { value: `${taskCategoryFilterPrefix}仕事`, label: "仕事", color: null },
+    { value: `${taskCategoryFilterPrefix}私用`, label: "私用", color: null },
+    { value: unassignedTimeProjectFilterValue, label: "未設定", color: getProjectColor(null) },
     ...applicationState.projects.map(function createTimeProjectFilterOption(project) {
       return {
         value: project.identifier,
@@ -3170,7 +3175,8 @@ function initializeTimeTrackingActions() {
     moveTimeReportAnchor(1);
     await loadTimeReport();
   });
-  document.getElementById("time-project-filter").addEventListener("change", loadTimeReport);
+  document.getElementById("time-project-filter").addEventListener("change", handleTimeProjectFilterChange);
+  document.getElementById("show-private-time").addEventListener("change", loadTimeReport);
 }
 
 /** 自由活動開始ダイアログを表示する。 */
@@ -3212,6 +3218,15 @@ async function startFreeActivity(event) {
   }
 }
 
+/** 私用の絞り込み選択時に集計への包含を有効にする。 */
+function handleTimeProjectFilterChange() {
+  // 私用を選んだ時だけチェックを付け、その他の選択では利用者の指定を維持する。
+  if (document.getElementById("time-project-filter").value === `${taskCategoryFilterPrefix}私用`) {
+    document.getElementById("show-private-time").checked = true;
+  }
+  return loadTimeReport();
+}
+
 /** 作業時間レポートと対象期間のログを取得する。 */
 async function loadTimeReport() {
   // 選択期間、基準日、プロジェクト条件を同じクエリへ反映する。
@@ -3219,9 +3234,14 @@ async function loadTimeReport() {
   const period = applicationState.timeReportPeriod;
   const anchor = formatLocalDate(applicationState.timeReportAnchor);
   const projectIdentifier = document.getElementById("time-project-filter").value;
-  const projectQuery = projectIdentifier
-    ? `&projectIdentifier=${encodeURIComponent(projectIdentifier)}`
-    : "";
+  const queryParameters = new URLSearchParams();
+  if (projectIdentifier.startsWith(taskCategoryFilterPrefix)) {
+    queryParameters.set("category", projectIdentifier.slice(taskCategoryFilterPrefix.length));
+  } else if (projectIdentifier) {
+    queryParameters.set("projectIdentifier", projectIdentifier);
+  }
+  queryParameters.set("includePrivate", document.getElementById("show-private-time").checked);
+  const projectQuery = `&${queryParameters}`;
   const report = await apiRequest(
     `/api/v1/time-reports?period=${encodeURIComponent(period)}&anchor=${encodeURIComponent(anchor)}${projectQuery}`);
   const entries = await apiRequest(
@@ -3354,7 +3374,7 @@ function renderTimeEntryList(entries) {
       0,
       Math.floor(((timeEntry.endAt ? Date.parse(timeEntry.endAt) : Date.now()) - Date.parse(timeEntry.startAt)) / 1000));
     return `<div class="time-entry-row" style="--project-color:${getProjectColor(timeEntry.projectIdentifier)}">
-      <div><strong>${escapeHtml(timeEntry.title)}</strong><span>${escapeHtml(timeEntry.projectNameSnapshot || "未割当")}・${escapeHtml(timeEntry.identifier)}</span></div>
+      <div><strong>${escapeHtml(timeEntry.title)}</strong><span>${escapeHtml(timeEntry.projectNameSnapshot || "未設定")}・${escapeHtml(timeEntry.identifier)}</span></div>
       <div>${formatDateTime(timeEntry.startAt)}<span>～ ${endText}</span></div>
       <div>${formatDuration(durationSeconds)}</div>
       <div>

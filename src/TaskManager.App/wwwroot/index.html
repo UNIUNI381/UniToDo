@@ -109,6 +109,7 @@
             <select id="time-project-filter" hidden aria-hidden="true" tabindex="-1"><option value="">すべてのプロジェクト</option></select>
           </div>
         </div>
+        <label class="checkbox-label"><input id="show-private-time" type="checkbox" autocomplete="off">私用を表示</label>
         <h2 id="time-report-range" class="time-report-range"></h2>
         <div class="time-summary-grid">
           <article class="time-summary-card"><span>合計時間</span><strong id="time-total-duration">0分</strong></article>
@@ -394,11 +395,11 @@
           <div id="free-activity-project-control" class="project-filter-control">
             <button id="free-activity-project-button" class="project-filter-button" type="button" data-filter-select="free-activity-project" aria-haspopup="listbox" aria-expanded="false">
               <span id="free-activity-project-dot" class="project-filter-dot"></span>
-              <span id="free-activity-project-label">未割当</span>
+              <span id="free-activity-project-label">未設定</span>
               <span class="project-filter-chevron" aria-hidden="true"></span>
             </button>
             <div id="free-activity-project-menu" class="project-filter-menu hidden" data-filter-select="free-activity-project" role="listbox" aria-label="プロジェクトを選択"></div>
-            <select id="free-activity-project" name="projectIdentifier" hidden aria-hidden="true" tabindex="-1"><option value="">未割当</option></select>
+            <select id="free-activity-project" name="projectIdentifier" hidden aria-hidden="true" tabindex="-1"><option value="">未設定</option></select>
           </div>
         </div>
       </div>
@@ -414,7 +415,7 @@
       <div class="form-grid">
         <label class="wide-field">名称<input name="title" type="text" required maxlength="200"></label>
         <label>タスク<select name="taskIdentifier"><option value="">自由活動</option></select></label>
-        <label>プロジェクト<select name="projectIdentifier"><option value="">未割当</option></select></label>
+        <label>プロジェクト<select name="projectIdentifier"><option value="">未設定</option></select></label>
         <label>開始日時<input name="startAt" type="datetime-local" required></label>
         <label>終了日時<input name="endAt" type="datetime-local" required></label>
       </div>
@@ -442,6 +443,6 @@
   <link rel="stylesheet" href="assistant.css?v=20260910-02">
   <script src="assistant.js?v=20260911-04" defer></script>
   <script src="mobile-navigation.js?v=20260910-03" defer></script>
-  <script src="app.js?v=20260917-01" defer></script>
+  <script src="app.js?v=20260922-01" defer></script>
 </body>
 </html>

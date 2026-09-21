@@ -17,12 +17,28 @@ public sealed class TimeEntryRepository(DatabaseInitializer databaseInitializer)
         string? projectIdentifier = null,
         string? taskIdentifier = null,
         bool includeVoided = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? category = null,
+        bool includePrivate = true)
     {
         // 任意の期間・関連先・無効化条件をSQLへ組み立てる。
         await using SqliteConnection connection = initializer.OpenConnection();
         List<string> conditions = [];
         await using SqliteCommand command = connection.CreateCommand();
+        // 関連タスクの区分で絞り、自由活動と削除済みタスクは仕事として扱う。
+        if (category is not null and not TaskConstants.WorkCategory and not TaskConstants.PrivateCategory)
+        {
+            throw new InvalidOperationException("categoryは仕事または私用を指定してください。");
+        }
+        if (category is not null)
+        {
+            conditions.Add($"{CategorySql} = $category");
+            command.Parameters.AddWithValue("$category", category);
+        }
+        if (!includePrivate)
+        {
+            conditions.Add($"{CategorySql} <> '私用'");
+        }
         if (rangeStart.HasValue)
         {
             // オフセット表記が異なる日時も同じ絶対時刻として比較する。
@@ -432,6 +448,7 @@ public sealed class TimeEntryRepository(DatabaseInitializer databaseInitializer)
             ProjectIdentifier = ReadNullableString(reader, "project_identifier"),
             Title = reader.GetString(reader.GetOrdinal("title")),
             ProjectNameSnapshot = reader.GetString(reader.GetOrdinal("project_name_snapshot")),
+            Category = reader.GetString(reader.GetOrdinal("category")),
             StartAt = ParseDate(reader.GetString(reader.GetOrdinal("start_at"))),
             EndAt = ReadNullableDate(reader, "end_at"),
             StopReason = reader.GetString(reader.GetOrdinal("stop_reason")),
@@ -621,10 +638,13 @@ public sealed class TimeEntryRepository(DatabaseInitializer databaseInitializer)
     }
 
     // 作業ログ読込で共通利用する列一覧を保持する。
-    private const string SelectColumnsSql = """
+    // 関連タスクの区分を取得する共通SQLを保持する。
+    private const string CategorySql = "COALESCE((SELECT category FROM tasks WHERE tasks.identifier = time_entries.task_identifier), '仕事')";
+    private const string SelectColumnsSql = $"""
         SELECT identifier, task_identifier, project_identifier, title, project_name_snapshot,
                start_at, end_at, stop_reason, source, warning_at, next_warning_at,
-               needs_review, review_reason, created_at, updated_at, voided_at
+               needs_review, review_reason, created_at, updated_at, voided_at,
+               {CategorySql} AS category
         FROM time_entries
         """;
 }

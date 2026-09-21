@@ -2707,8 +2707,43 @@ public static class Program
         Assert(
             unassignedReport.Projects.Count == 1
             && unassignedReport.Projects[0].ProjectIdentifier == TimeTrackingConstants.UnassignedProjectIdentifier
-            && unassignedReport.Projects[0].ProjectName == "未割当",
+            && unassignedReport.Projects[0].ProjectName == "未設定（仕事）",
             "未割当の作業時間だけを集計できませんでした。");
+
+        // 私用タスクを同じ時間帯へ追加し、除外・区分絞り込み・未設定の分離を確認する。
+        ManagedTask privateTask = CreateTask("PRIVATE-TIME", "私用集計テスト");
+        privateTask.Category = TaskConstants.PrivateCategory;
+        await taskService.AddTaskAsync(privateTask, TaskConstants.SystemSource);
+        await taskService.AddManualTimeEntryAsync(new TimeEntryMutationRequest
+        {
+            TaskIdentifier = privateTask.Identifier,
+            Title = privateTask.Title,
+            StartAt = StandardTime(),
+            EndAt = StandardTime().AddMinutes(30),
+            AllowOverlap = true
+        }, TaskConstants.SystemSource);
+        TimeReportResult workReport = await reportService.GetReportAsync(
+            "day", new DateOnly(2026, 7, 21), null, includePrivate: false);
+        Assert(workReport.TotalSeconds == archivedReport.TotalSeconds && workReport.OverlapCount == 0,
+            "私用除外後の合計または重複件数が一致しません。");
+        TimeReportResult privateReport = await reportService.GetReportAsync(
+            "day", new DateOnly(2026, 7, 21), null, category: TaskConstants.PrivateCategory);
+        Assert(privateReport.TotalSeconds == 1800 && privateReport.Tasks.Count == 1,
+            "私用だけの集計が一致しません。");
+        TimeReportResult combinedReport = await reportService.GetReportAsync(
+            "day", new DateOnly(2026, 7, 21), TimeTrackingConstants.UnassignedProjectIdentifier);
+        Assert(combinedReport.Projects.Count == 2
+            && combinedReport.Projects.Any(project => project.ProjectName == "未設定（私用）" && project.TotalSeconds == 1800)
+            && combinedReport.Buckets.SelectMany(bucket => bucket.Projects).Any(project =>
+                project.ProjectIdentifier == TimeTrackingConstants.UnassignedPrivateProjectIdentifier),
+            "未設定の仕事と私用が別系列へ集計されません。");
+        List<TimeEntryRecord> privateEntries = await testDatabase.TimeEntryRepository.GetEntriesAsync(
+            null, null, category: TaskConstants.PrivateCategory);
+        Assert(privateEntries.Count == 1 && privateEntries[0].TaskIdentifier == privateTask.Identifier,
+            "私用のログ絞り込みが一致しません。");
+        TimeReportResult excludedPrivateReport = await reportService.GetReportAsync(
+            "day", new DateOnly(2026, 7, 21), null, category: TaskConstants.PrivateCategory, includePrivate: false);
+        Assert(excludedPrivateReport.TotalSeconds == 0, "私用を非表示にしても集計に含まれています。");
     }
 
     /// <summary>異常終了情報が復旧通知後もユーザー確認まで保持されることを検証する。</summary>
