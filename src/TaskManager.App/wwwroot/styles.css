@@ -308,7 +308,10 @@ dialog::backdrop { background: rgba(12,25,18,.52); backdrop-filter: blur(3px); }
 #free-activity-dialog { overflow: visible; }
 #free-activity-dialog .project-filter-menu { max-height: min(320px, calc(100vh - 300px)); overflow-y: auto; }
 .time-report-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-bottom: 12px; }
-.time-report-toolbar > .project-filter-control { width: auto; min-width: 220px; margin-left: auto; }
+/* 絞り込みと私用チェックを同じ行に保ち、ツールバーの右へ寄せる。 */
+.time-report-filters { display: flex; align-items: center; gap: 14px; margin-left: auto; min-width: 0; max-width: 100%; }
+.time-report-filters > .project-filter-control { width: 220px; min-width: 0; }
+.time-report-filters > .checkbox-label { flex-shrink: 0; white-space: nowrap; }
 .segmented-control { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 11px; background: white; }
 .segmented-control button { border: 0; border-radius: 8px; padding: 8px 16px; background: transparent; color: var(--muted); font-weight: 700; }
 .segmented-control button.active { background: var(--green); color: white; }
@@ -394,7 +397,8 @@ dialog::backdrop { background: rgba(12,25,18,.52); backdrop-filter: blur(3px); }
   .wide-field { grid-column: auto; }
   .timeline-item { grid-template-columns: 1fr; gap: 5px; }
   .time-summary-grid, .time-report-tables { grid-template-columns: 1fr; }
-  .time-report-toolbar > .project-filter-control { width: 100%; margin-left: 0; }
+  .time-report-filters { width: 100%; margin-left: 0; }
+  .time-report-filters > .project-filter-control { flex: 1; }
   .time-entry-row { grid-template-columns: 1fr; gap: 7px; }
   .dependency-graph-levels { gap: 54px; }
   .dependency-level { width: 210px; }

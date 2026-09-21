@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1c6b47">
   <title>UniToDo</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=20260917-02">
+  <link rel="stylesheet" href="styles.css?v=20260922-01">
 </head>
 <body>
   <div class="app-shell">
@@ -99,17 +99,19 @@
             <button id="today-time-period" type="button" class="secondary-button">今日</button>
             <button id="next-time-period" type="button" class="secondary-button">次へ</button>
           </div>
-          <div id="time-project-filter-control" class="project-filter-control">
-            <button id="time-project-filter-button" class="project-filter-button" type="button" data-filter-select="time-project-filter" aria-haspopup="listbox" aria-expanded="false">
-              <span id="time-project-filter-dot" class="project-filter-dot hidden"></span>
-              <span id="time-project-filter-label">すべてのプロジェクト</span>
-              <span class="project-filter-chevron" aria-hidden="true"></span>
-            </button>
-            <div id="time-project-filter-menu" class="project-filter-menu hidden" data-filter-select="time-project-filter" role="listbox" aria-label="プロジェクトで絞り込む"></div>
-            <select id="time-project-filter" hidden aria-hidden="true" tabindex="-1"><option value="">すべてのプロジェクト</option></select>
+          <div class="time-report-filters">
+            <div id="time-project-filter-control" class="project-filter-control">
+              <button id="time-project-filter-button" class="project-filter-button" type="button" data-filter-select="time-project-filter" aria-haspopup="listbox" aria-expanded="false">
+                <span id="time-project-filter-dot" class="project-filter-dot hidden"></span>
+                <span id="time-project-filter-label">すべてのプロジェクト</span>
+                <span class="project-filter-chevron" aria-hidden="true"></span>
+              </button>
+              <div id="time-project-filter-menu" class="project-filter-menu hidden" data-filter-select="time-project-filter" role="listbox" aria-label="プロジェクトで絞り込む"></div>
+              <select id="time-project-filter" hidden aria-hidden="true" tabindex="-1"><option value="">すべてのプロジェクト</option></select>
+            </div>
+            <label class="checkbox-label"><input id="show-private-time" type="checkbox" autocomplete="off">私用を表示</label>
           </div>
         </div>
-        <label class="checkbox-label"><input id="show-private-time" type="checkbox" autocomplete="off">私用を表示</label>
         <h2 id="time-report-range" class="time-report-range"></h2>
         <div class="time-summary-grid">
           <article class="time-summary-card"><span>合計時間</span><strong id="time-total-duration">0分</strong></article>
