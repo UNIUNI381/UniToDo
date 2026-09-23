@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 
@@ -63,7 +64,11 @@ public sealed class CodexAppServer : ICodexAppServer
             }
             if (!initialized)
             {
-                await RequestAsync("initialize", new { clientInfo = new { name = "unitodo", version = "1.0.0" } });
+                // 製品版はビルド時の共通設定から生成されたアセンブリ情報を使用する。
+                string version = typeof(CodexAppServer).Assembly
+                    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion.Split('+', 2)[0]
+                    ?? throw new InvalidOperationException("UniToDoの製品バージョンを取得できません。");
+                await RequestAsync("initialize", new { clientInfo = new { name = "unitodo", version } });
                 await WriteAsync(new { method = "initialized" });
                 initialized = true;
             }
