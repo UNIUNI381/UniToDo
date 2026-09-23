@@ -9,6 +9,23 @@ namespace TaskManager.Cli;
 /// <summary>別Codexスレッドから利用するtaskctlコマンドを実行する。</summary>
 public sealed class CliRunner
 {
+    // 保存後の再取得結果と、再送判断に必要な保存応答を保持する。
+    private sealed class VerifiedWriteResult
+    {
+        // 保存APIが成功応答を返したか保持する。
+        public bool Saved { get; init; } = true;
+        // 独立した読戻しとの照合結果を保持する。
+        public bool Verified { get; init; }
+        // 再送を防ぐため保存対象IDを保持する。
+        public string Identifier { get; init; } = string.Empty;
+        // 保存直後にAPIが返した内容を保持する。
+        public JsonElement? WriteResult { get; init; }
+        // 独立した読戻し内容を保持する。
+        public JsonElement? Readback { get; init; }
+        // 確認できなかった理由を保持する。
+        public string Warning { get; init; } = string.Empty;
+    }
+
     // JSON入出力とローカルAPI接続設定を保持する。
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -48,6 +65,9 @@ public sealed class CliRunner
         {
             string commandName = arguments[0].ToLowerInvariant();
             bool jsonOutput = arguments.Contains("--json", StringComparer.OrdinalIgnoreCase);
+            bool verify = arguments.Contains("--verify", StringComparer.OrdinalIgnoreCase);
+            if (verify && commandName is not ("add" or "update" or "draft-create" or "start" or "complete" or "continue" or "interrupt" or "postpone" or "cancel"))
+                throw new InvalidOperationException("--verifyはタスク・下書きの書込みと状態操作だけで使用できます。");
             ValidateFileOption(arguments);
             // 出力指定の誤りは更新APIを呼ぶ前に拒否する。
             string[]? fields = CliJsonOutput.ParseFields(arguments);
@@ -73,6 +93,7 @@ public sealed class CliRunner
             };
             WriteResponse(fields is null ? response : CliJsonOutput.SelectFields(response, fields), jsonOutput || fields is not null, commandName);
             WriteWarning(response, commandName);
+            if (response is VerifiedWriteResult verification && !verification.Verified) return 3;
             return IsProjectClarificationRequired(commandName, response) ? 2 : 0;
         }
         catch (Exception commandError)
@@ -155,7 +176,10 @@ public sealed class CliRunner
             task.DeadlineType = TaskConstants.NoDeadlineType;
             task.DeadlineOrigin = ProjectConstants.NoDeadlineOrigin;
         }
-        return await PostAsync("/api/v1/tasks", task, cancellationToken);
+        object? response = await PostAsync("/api/v1/tasks", task, cancellationToken);
+        return HasOption(arguments, "--verify")
+            ? await VerifyTaskWriteAsync(response, null, null, cancellationToken)
+            : response;
     }
 
     /// <summary>プロジェクトの参照、登録、背景情報更新を実行する。</summary>
@@ -307,7 +331,10 @@ public sealed class CliRunner
         }
         string identifier = arguments[1];
         JsonElement task = await ReadJsonFileAsync<JsonElement>(arguments, cancellationToken);
-        return await PutAsync($"/api/v1/tasks/{Uri.EscapeDataString(identifier)}", task, cancellationToken);
+        object? response = await PutAsync($"/api/v1/tasks/{Uri.EscapeDataString(identifier)}", task, cancellationToken);
+        return HasOption(arguments, "--verify")
+            ? await VerifyTaskWriteAsync(response, identifier, task, cancellationToken)
+            : response;
     }
 
     /// <summary>同じIDの明示確認を要求してタスクを完全削除する。</summary>
@@ -342,10 +369,16 @@ public sealed class CliRunner
         int? postponeMinutes = actionName == "postpone"
             ? ParseInteger(GetOption(arguments, "--minutes"), 60)
             : null;
-        return await PostAsync(
+        object? response = await PostAsync(
             $"/api/v1/tasks/{Uri.EscapeDataString(identifier)}/actions/{actionName}",
             new { postponeMinutes },
             cancellationToken);
+        return HasOption(arguments, "--verify")
+            ? await VerifyReadbackAsync(response, identifier,
+                $"/api/v1/tasks/{Uri.EscapeDataString(identifier)}",
+                (writeResult, readback) => VerifyActionReadback(actionName, identifier, readback),
+                cancellationToken)
+            : response;
     }
 
     /// <summary>AI分解結果のJSONファイルを下書き登録する。</summary>
@@ -354,7 +387,201 @@ public sealed class CliRunner
         // 下書きはCLIから承認せず、任意の冪等キーを付けて画面確認へ回す。
         DraftBatchRequest request = await ReadJsonFileAsync<DraftBatchRequest>(arguments, cancellationToken);
         request.IdempotencyKey = GetOption(arguments, "--idempotency-key") ?? request.IdempotencyKey;
-        return await PostAsync("/api/v1/draft-batches", request, cancellationToken);
+        object? response = await PostAsync("/api/v1/draft-batches", request, cancellationToken);
+        if (!HasOption(arguments, "--verify")) return response;
+        string batchIdentifier = response is JsonElement responseElement
+            ? GetString(responseElement, "batchIdentifier") ?? GetString(responseElement, "identifier") ?? string.Empty
+            : string.Empty;
+        return await VerifyReadbackAsync(response, batchIdentifier,
+            $"/api/v1/draft-batches/{Uri.EscapeDataString(batchIdentifier)}",
+            (writeResult, readback) => VerifyDraftReadback(writeResult, readback, request),
+            cancellationToken);
+    }
+
+    /// <summary>保存済みタスクを独立して取得し、保存応答と変更項目を照合する。</summary>
+    private Task<VerifiedWriteResult> VerifyTaskWriteAsync(
+        object? response,
+        string? requestedIdentifier,
+        JsonElement? changes,
+        CancellationToken cancellationToken)
+    {
+        // 追加は生成ID、更新は指定IDを使い、対象の取り違えも検出する。
+        string identifier = response is JsonElement responseElement
+            ? GetString(responseElement, "identifier") ?? requestedIdentifier ?? string.Empty
+            : requestedIdentifier ?? string.Empty;
+        string[] fields = changes is null
+            ? ["identifier", "projectIdentifier", "status", "title", "deadlineAt", "deadlineType",
+                "deadlineOrigin", "estimatedMinutes", "importance", "completionCondition", "dependencyIdentifiers"]
+            : ["identifier", "projectIdentifier", "status", .. changes.Value.EnumerateObject().Select(property => property.Name)];
+        return VerifyReadbackAsync(response, identifier,
+            $"/api/v1/tasks/{Uri.EscapeDataString(identifier)}",
+            (writeResult, readback) =>
+                (requestedIdentifier is null || string.Equals(identifier, requestedIdentifier, StringComparison.OrdinalIgnoreCase))
+                && MatchProperties(writeResult, readback, fields),
+            cancellationToken);
+    }
+
+    /// <summary>保存応答を保持したまま再取得の成否と内容を検証する。</summary>
+    private async Task<VerifiedWriteResult> VerifyReadbackAsync(
+        object? response,
+        string identifier,
+        string path,
+        Func<JsonElement, JsonElement, bool> matches,
+        CancellationToken cancellationToken)
+    {
+        // HTTP成功後の確認失敗は未保存と扱わず、再送を防ぐ情報を返す。
+        JsonElement? writeResult = response is JsonElement responseElement ? responseElement : null;
+        bool saved = writeResult?.ValueKind == JsonValueKind.Object
+            && writeResult.Value.TryGetProperty("saved", out JsonElement savedValue)
+            ? savedValue.ValueKind == JsonValueKind.True
+            : true;
+        if (string.IsNullOrWhiteSpace(identifier) || writeResult?.ValueKind != JsonValueKind.Object)
+            return new VerifiedWriteResult
+            {
+                Saved = saved,
+                Identifier = identifier,
+                WriteResult = writeResult,
+                Warning = "保存応答から確認対象を特定できません。自動再送せず状態を確認してください。"
+            };
+        JsonElement? readback = null;
+        string warning = string.Empty;
+        try
+        {
+            object? readResponse = await GetAsync(path, cancellationToken);
+            readback = readResponse is JsonElement readElement ? readElement : null;
+            if (readback?.ValueKind != JsonValueKind.Object || !matches(writeResult.Value, readback.Value))
+                warning = "保存後の再取得内容が一致しません。自動再送せず状態を確認してください。";
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            warning = $"保存後の再取得に失敗しました: {exception.Message}。自動再送せず状態を確認してください。";
+        }
+        return new VerifiedWriteResult
+        {
+            Saved = saved,
+            Identifier = identifier,
+            WriteResult = writeResult,
+            Readback = readback,
+            Verified = string.IsNullOrEmpty(warning),
+            Warning = warning
+        };
+    }
+
+    /// <summary>保存応答と再取得結果の指定項目が一致するか調べる。</summary>
+    private static bool MatchProperties(JsonElement expected, JsonElement actual, IEnumerable<string> fields)
+    {
+        // 正規化済みの保存応答を基準に、ID・状態と依頼で変更した項目を比較する。
+        if (expected.ValueKind != JsonValueKind.Object || actual.ValueKind != JsonValueKind.Object) return false;
+        foreach (string field in fields.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!TryGetProperty(expected, field, out JsonElement expectedValue)
+                || !TryGetProperty(actual, field, out JsonElement actualValue)
+                || !JsonElement.DeepEquals(expectedValue, actualValue)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>更新入力と同じ規則でJSON項目を大文字小文字を問わず探す。</summary>
+    private static bool TryGetProperty(JsonElement element, string name, out JsonElement value)
+    {
+        // API応答のcamelCaseと利用者入力の表記差を吸収する。
+        if (element.TryGetProperty(name, out value)) return true;
+        foreach (JsonProperty property in element.EnumerateObject())
+        {
+            if (!string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)) continue;
+            value = property.Value;
+            return true;
+        }
+        value = default;
+        return false;
+    }
+
+    /// <summary>状態操作の対象IDと到達すべき状態を検証する。</summary>
+    private static bool VerifyActionReadback(string actionName, string identifier, JsonElement readback)
+    {
+        // 推薦結果には対象タスクが含まれないため、操作名に対応する保存状態を調べる。
+        string? expectedStatus = actionName switch
+        {
+            "start" or "continue" => TaskConstants.InProgressStatus,
+            "complete" => TaskConstants.CompletedStatus,
+            "interrupt" or "postpone" => TaskConstants.ReadyStatus,
+            "cancel" => TaskConstants.CancelledStatus,
+            _ => null
+        };
+        if (!string.Equals(GetString(readback, "identifier"), identifier, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(GetString(readback, "status"), expectedStatus, StringComparison.Ordinal)) return false;
+        return actionName switch
+        {
+            "start" => HasValue(readback, "startedAt"),
+            "complete" => HasValue(readback, "completedAt")
+                && readback.TryGetProperty("remainingMinutes", out JsonElement remainingMinutes)
+                && remainingMinutes.ValueKind == JsonValueKind.Number && remainingMinutes.GetInt32() == 0,
+            "continue" => HasValue(readback, "followUpAt"),
+            "interrupt" => !HasValue(readback, "startedAt"),
+            "postpone" => HasValue(readback, "earliestStartAt"),
+            _ => true
+        };
+    }
+
+    /// <summary>下書きの件数、ID対応、依存関係を保存後のバッチと照合する。</summary>
+    private static bool VerifyDraftReadback(
+        JsonElement writeResult,
+        JsonElement readback,
+        DraftBatchRequest request)
+    {
+        // 冪等再送でも同じ仮参照キーと実IDの対応だけを成功として扱う。
+        DraftBatchCreationResult? created = writeResult.Deserialize<DraftBatchCreationResult>(JsonOptions);
+        DraftBatchRecord? batch = readback.Deserialize<DraftBatchRecord>(JsonOptions);
+        if (created is null || batch is null || !created.Saved
+            || !string.Equals(created.BatchIdentifier, batch.BatchIdentifier, StringComparison.Ordinal)
+            || created.TaskCount != request.Tasks.Count || batch.TaskCount != created.TaskCount
+            || batch.Tasks.Count != created.TaskCount || batch.TaskMappings.Count != created.TaskMappings.Count
+            || batch.PostProcessingSucceeded != created.PostProcessingSucceeded) return false;
+        Dictionary<string, string> mappings = created.TaskMappings.ToDictionary(
+            mapping => mapping.AiReferenceKey,
+            mapping => mapping.TaskIdentifier,
+            StringComparer.OrdinalIgnoreCase);
+        if (mappings.Count != request.Tasks.Count) return false;
+        foreach (DraftTaskMapping savedMapping in batch.TaskMappings)
+        {
+            if (!mappings.TryGetValue(savedMapping.AiReferenceKey, out string? identifier)
+                || !string.Equals(identifier, savedMapping.TaskIdentifier, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        foreach (ManagedTask requestedTask in request.Tasks)
+        {
+            if (!mappings.TryGetValue(requestedTask.AiReferenceKey, out string? identifier)) return false;
+            ManagedTask? savedTask = batch.Tasks.FirstOrDefault(task =>
+                string.Equals(task.Identifier, identifier, StringComparison.OrdinalIgnoreCase));
+            if (savedTask is null || !string.Equals(savedTask.AiReferenceKey, requestedTask.AiReferenceKey, StringComparison.OrdinalIgnoreCase))
+                return false;
+            HashSet<string> expectedDependencies = requestedTask.DependencyIdentifiers
+                .Select(dependency => mappings.GetValueOrDefault(dependency) ?? dependency)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (!expectedDependencies.SetEquals(savedTask.DependencyIdentifiers)) return false;
+        }
+        return true;
+    }
+
+    /// <summary>JSONオブジェクトの文字列項目を安全に取り出す。</summary>
+    private static string? GetString(JsonElement element, string name)
+    {
+        // 欠落やnullは確認不能として返す。
+        return element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(name, out JsonElement value)
+            && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+    }
+
+    /// <summary>JSONオブジェクトの項目に値があるか調べる。</summary>
+    private static bool HasValue(JsonElement element, string name)
+    {
+        // 状態変更で設定される日時をnullと区別する。
+        return element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(name, out JsonElement value)
+            && value.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined);
     }
 
     /// <summary>保存済み下書きバッチの一覧または詳細を取得する。</summary>
@@ -645,6 +872,11 @@ public sealed class CliRunner
     private static void WriteResponse(object? response, bool jsonOutput, string commandName)
     {
         // AI向けJSONと人が読む短い通常出力を明確に分ける。
+        if (response is VerifiedWriteResult verification)
+        {
+            Console.WriteLine(JsonSerializer.Serialize(verification, JsonOptions));
+            return;
+        }
         if (response is null)
         {
             Console.WriteLine(jsonOutput
@@ -856,7 +1088,13 @@ public sealed class CliRunner
     /// <summary>成功応答に含まれる保存後警告を標準エラーへ表示する。</summary>
     private static void WriteWarning(object? response, string commandName)
     {
-        // JSON標準出力を壊さずdraft-createの警告だけを標準エラーへ分離する。
+        // JSON標準出力を壊さず検証失敗と下書き保存後警告を標準エラーへ分離する。
+        if (response is VerifiedWriteResult verification)
+        {
+            if (!string.IsNullOrWhiteSpace(verification.Warning))
+                Console.Error.WriteLine($"警告: {verification.Warning}");
+            response = verification.WriteResult;
+        }
         if (commandName != "draft-create"
             || response is not JsonElement responseElement
             || !responseElement.TryGetProperty("warning", out JsonElement warningElement))
@@ -1028,7 +1266,7 @@ public sealed class CliRunner
         // 冪等再送とコミット後警告をCodexが判断できる情報量で示す。
         Console.WriteLine("""
             使用法:
-              taskctl draft-create --file draft.json [--idempotency-key KEY] [--json]
+              taskctl draft-create --file draft.json [--idempotency-key KEY] [--verify] [--json]
 
             入力:
               各tasks要素のaiReferenceKeyは必須かつバッチ内で一意です。
@@ -1037,10 +1275,12 @@ public sealed class CliRunner
             出力:
               --json  指定時はbatchIdentifier、identifier、saved、taskCount、
                       postProcessingSucceeded、warning、taskMappingsをJSONで返します。
+              --verify  保存後にバッチを再取得し、件数・ID対応・依存を照合します。
 
             終了コード:
               0  保存成功。保存後の検証・推薦失敗も警告付きで0です。
               1  入力不正、未解決参照、コミット前またはコミット失敗です。
+              3  保存応答は得られましたが読戻しを確認できません。再送しないでください。
 
             警告:
               保存後処理に失敗した場合も下書きは保存済みです。
@@ -1076,15 +1316,17 @@ public sealed class CliRunner
         Console.WriteLine("""
             使用法:
               taskctl add --title 名称 [--project IDまたは表記] [--minutes 30]
-                          [--deadline 日時] [--importance 3] [--json]
-              taskctl add --file task.json [--project IDまたは表記] [--no-deadline] [--json]
+                          [--deadline 日時] [--importance 3] [--verify] [--json]
+              taskctl add --file task.json [--project IDまたは表記] [--no-deadline] [--verify] [--json]
 
             出力:
               --json  保存後のタスク全項目をJSONで返します。
+              --verify  保存後にタスクを再取得し、保存応答と照合したJSONを返します。
 
             終了コード:
               0  保存成功です。
               1  入力不正、プロジェクト未解決、保存失敗です。
+              3  保存応答は得られましたが読戻しを確認できません。再送しないでください。
 
             注意:
               プロジェクト表記は事前にprepareし、解決済みIDを指定してください。
@@ -1124,13 +1366,13 @@ public sealed class CliRunner
             taskctl now [--json]
             taskctl list [--status 状態] [--search 文字列] [--project IDまたは表記] [--json]
             taskctl get TASK-ID [--json]
-            taskctl add --title 名称 [--project IDまたは表記] [--minutes 30] [--deadline 日時] [--importance 3]
-            taskctl add --file task.json [--project IDまたは表記] [--no-deadline]
-            taskctl update TASK-ID --file task.json
+            taskctl add --title 名称 [--project IDまたは表記] [--minutes 30] [--deadline 日時] [--importance 3] [--verify]
+            taskctl add --file task.json [--project IDまたは表記] [--no-deadline] [--verify]
+            taskctl update TASK-ID --file task.json [--verify]
               指定項目だけを更新。省略は維持、nullは解除。締切変更はdeadlineAtとdeadlineOrigin: explicitを指定。
             taskctl delete TASK-ID --confirm TASK-ID
-            taskctl start|complete|continue|interrupt|postpone|cancel TASK-ID
-            taskctl draft-create --file draft.json [--idempotency-key KEY] [--json]
+            taskctl start|complete|continue|interrupt|postpone|cancel TASK-ID [--verify]
+            taskctl draft-create --file draft.json [--idempotency-key KEY] [--verify] [--json]
             taskctl draft list [--project IDまたは表記] [--json]
             taskctl draft get BATCH-ID [--json]
             taskctl project list [--include-archived] [--json]

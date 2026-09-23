@@ -98,6 +98,7 @@ public sealed class CodexChatService
             + "これはUniToDo専用会話です。タスク操作には $manage-local-tasks の業務規則を守り、専用PATHの taskctl を直接実行してください。"
             + "taskctl now --json のように呼び、絶対パス、invoke-taskctl.ps1、追加のpowershell起動は不要です。"
             + "通常のスキル読取りとCLI実行は承認済みです。JSON入力は --file -、読取は --fields を必要時に使い、一時ファイルを減らしてください。"
+            + "タスクの追加・更新・状態操作と下書き登録は --verify --json を付け、CLI内の読戻し結果を確認してください。"
             + "PowerShell 5.1で日本語JSONをパイプ入力する場合は $OutputEncoding=[Text.Encoding]::UTF8 を同じコマンド内で先に設定してください。"
             + "ただし対象や依頼内容が曖昧な場合、削除やスキルで指定された業務上の確認は省略しないでください。"
             + "SQLite・APIの直接操作、ソース編集、プログラム開発は行わないでください。"

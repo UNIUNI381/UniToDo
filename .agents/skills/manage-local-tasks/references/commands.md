@@ -7,10 +7,10 @@
 ```text
 now|list [--json]
 get TASK-ID [--json]
-add ... | update ID --file task.json
-start|complete|continue|interrupt|postpone|cancel ID
+add ... --verify --json | update ID --file task.json --verify --json
+start|complete|continue|interrupt|postpone|cancel ID --verify --json
 delete ID --confirm ID
-draft-create --file draft.json --idempotency-key KEY --json
+draft-create --file draft.json --idempotency-key KEY --verify --json
 draft list [--project PROJECT-ID] --json
 draft get BATCH-ID --json
 project list|resolve|prepare|create|update|archive|alias-add|context-add|context-update
@@ -29,6 +29,7 @@ UniToDo専用会話では専用PATHの`taskctl`を直接実行する。通常の
 - 読取では`--fields identifier,title,projectIdentifier,status`で必要項目だけを選ぶ。`--json`は省略できる。ネストは`recommendation.task.title`形式。配列の件数、null、空配列を保持する。存在しない項目はエラー。ただしnull・空配列の内部の項目名は検証できない。
 - 対応する読取は`now/list/get`、`project list`、`draft list/get`、`time active/list/report`。`project prepare/resolve`と更新応答は確認情報・警告を省略しない。
 - 書込み前後の確認にはID、projectIdentifier、状態、変更対象を必ず含める。単一タスクは`get ID`を使う。
+- タスクの追加・更新・状態操作と下書き登録の`--verify`はCLI内で保存後に再取得する。JSONは`{saved,verified,identifier,writeResult,readback,warning}`で、`verified: true`なら別途`get`しない。確認失敗は保存済みの可能性を保持して終了コード3となるため、自動再送しない。
 
 PowerShell 7での例（5.1では日本語を保つため同じコマンドの先頭に`$OutputEncoding=[Text.Encoding]::UTF8;`を付ける）:
 
