@@ -22,7 +22,7 @@ Vaultでは`.obsidian/app.json`と`.obsidian/.gitignore`を追跡します。リ
 
 ## 除外するもの
 
-- `.codex/`の下書き、`.dotnet/`のローカルSDK、`.vs/`、`.idea/`、`.vscode/`などの端末固有設定
+- `.codex/`の下書き、`.codex-remote-attachments/`の会話添付ファイル、`.dotnet/`のローカルSDK、`.vs/`、`.idea/`、`.vscode/`などの端末固有設定
 - `artifacts/`、`bin/`、`obj/`、`TestResults/`、coverage、ログ、一時ファイルなどの生成物
 - `data/`、SQLite本体、WAL、SHM、journal、バックアップ
 - `credentials.json`、OAuthトークン、環境変数ファイル、秘密鍵・証明書秘密鍵
