@@ -43,7 +43,6 @@ nav { display: grid; gap: 6px; }
 .page-header { display: flex; justify-content: space-between; align-items: end; margin-bottom: 28px; }
 .header-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .page-header h1 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -.04em; margin: 0; }
-.eyebrow { color: var(--green); font-size: 12px; font-weight: 800; letter-spacing: .18em; margin: 0 0 6px; }
 .recommendation-card, .sub-card, .settings-card, .draft-batch { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); }
 .recommendation-card { padding: clamp(24px, 4vw, 44px); min-height: 290px; position: relative; overflow: hidden; }
 .recommendation-card::after { content: ""; position: absolute; right: -70px; top: -100px; width: 260px; height: 260px; border-radius: 50%; background: var(--green-soft); opacity: .65; }

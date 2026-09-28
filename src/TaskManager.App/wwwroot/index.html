@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#1c6b47">
   <title>UniToDo</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="styles.css?v=20260922-01">
+  <link rel="stylesheet" href="styles.css?v=20260928-01">
 </head>
 <body>
   <div class="app-shell">
@@ -35,7 +35,7 @@
 
       <section id="view-dashboard" class="view active">
         <header class="page-header">
-          <div><p class="eyebrow">NOW</p><h1>今やること</h1></div>
+          <div><h1>今やること</h1></div>
           <div class="header-actions">
             <div id="dashboard-recommendation-filter-control" class="project-filter-control dashboard-filter-control">
               <button id="dashboard-recommendation-filter-button" class="project-filter-button" type="button" data-filter-select="dashboard-recommendation-filter" aria-haspopup="listbox" aria-expanded="false" aria-label="推薦範囲を選択">
@@ -56,10 +56,7 @@
         <div id="time-review-cards" class="time-review-cards"></div>
         <article id="calendar-widget" class="calendar-widget">
           <div class="calendar-widget-header">
-            <div>
-              <p class="eyebrow">CALENDAR</p>
-              <h2>Google Calendar</h2>
-            </div>
+            <div><h2>Calendar</h2></div>
             <div class="calendar-widget-actions">
               <button id="toggle-calendar-range" type="button" class="secondary-button">7日間を表示</button>
               <button id="sync-calendar-dashboard" type="button" class="secondary-button">同期</button>
@@ -85,7 +82,7 @@
 
       <section id="view-time" class="view">
         <header class="page-header">
-          <div><p class="eyebrow">TIME</p><h1>作業時間</h1></div>
+          <div><h1>作業時間</h1></div>
           <button id="new-time-entry" type="button" class="primary-button">作業ログを追加</button>
         </header>
         <div class="time-report-toolbar">
@@ -141,7 +138,7 @@
 
       <section id="view-tasks" class="view">
         <header class="page-header">
-          <div><p class="eyebrow">TASKS</p><h1>タスク</h1></div>
+          <div><h1>タスク</h1></div>
           <div class="header-actions">
             <button id="open-codex-task-thread-tasks" class="primary-button" data-open-codex-task-thread>Codexでタスク管理</button>
             <button id="new-task" class="primary-button">新しいタスク</button>
@@ -195,7 +192,7 @@
 
       <section id="view-projects" class="view">
         <header class="page-header">
-          <div><p class="eyebrow">PROJECTS</p><h1>プロジェクト</h1></div>
+          <div><h1>プロジェクト</h1></div>
           <button id="new-project" class="primary-button">新しいプロジェクト</button>
         </header>
         <div class="toolbar">
@@ -206,13 +203,13 @@
       </section>
 
       <section id="view-drafts" class="view">
-        <header class="page-header"><div><p class="eyebrow">AI DRAFTS</p><h1>AI下書き</h1></div></header>
+        <header class="page-header"><div><h1>AI下書き</h1></div></header>
         <p class="intro">別Codexスレッドから登録した分解案です。依存関係と完了条件を確認してから承認してください。</p>
         <div id="draft-list" class="stack-list"></div>
       </section>
 
       <section id="view-settings" class="view">
-        <header class="page-header"><div><p class="eyebrow">SETTINGS</p><h1>設定</h1></div></header>
+        <header class="page-header"><div><h1>設定</h1></div></header>
         <form id="settings-form" class="settings-layout">
           <article class="settings-card">
             <h2>作業時間</h2>
@@ -284,7 +281,7 @@
       </section>
 
       <section id="view-history" class="view">
-        <header class="page-header"><div><p class="eyebrow">HISTORY</p><h1>履歴</h1></div></header>
+        <header class="page-header"><div><h1>履歴</h1></div></header>
         <div class="history-toolbar">
           <label class="checkbox-label"><input id="show-calendar-history" type="checkbox">カレンダー同期ログを表示</label>
           <label class="checkbox-label"><input id="show-time-history" type="checkbox">作業ログを表示</label>
@@ -445,6 +442,6 @@
   <link rel="stylesheet" href="assistant.css?v=20260910-02">
   <script src="assistant.js?v=20260911-04" defer></script>
   <script src="mobile-navigation.js?v=20260910-03" defer></script>
-  <script src="app.js?v=20260922-01" defer></script>
+  <script src="app.js?v=20260928-01" defer></script>
 </body>
 </html>

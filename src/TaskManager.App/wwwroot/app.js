@@ -591,12 +591,21 @@ function renderCalendarWidget(result) {
 /** 現在の空き時間と次の予定を小さな要約として表示する。 */
 function renderCalendarSummary(currentSlot) {
   // 独立カードを廃止し、カレンダー見出し直下へ必要情報だけをまとめる。
-  const nextEventText = currentSlot.nextEventTitle
-    ? `次の予定：${escapeHtml(currentSlot.nextEventTitle)}${currentSlot.nextEventLocation ? `（${escapeHtml(currentSlot.nextEventLocation)}）` : ""}`
-    : escapeHtml(currentSlot.reason || "活動終了時刻まで予定はありません。");
+  const nextEventMarkup = currentSlot.nextEventTitle
+    ? `<span class="calendar-next-event">次の予定：${escapeHtml(currentSlot.nextEventTitle)}${currentSlot.nextEventLocation ? `（${escapeHtml(currentSlot.nextEventLocation)}）` : ""}</span>`
+    : "";
   document.getElementById("calendar-summary").innerHTML = `
-    <span class="calendar-availability-chip">今の空き ${currentSlot.availableMinutes}分</span>
-    <span class="calendar-next-event">${nextEventText}</span>`;
+    <span class="calendar-availability-chip">今の空き ${formatAvailableMinutes(currentSlot.availableMinutes)}</span>
+    ${nextEventMarkup}`;
+}
+
+/** 分単位の空き時間を時間と分の表記へ変換する。 */
+function formatAvailableMinutes(value) {
+  // 空き時間を0以上の整数へ補正し、時間と余り分に分ける。
+  const totalMinutes = Math.max(0, Math.floor(Number(value || 0)));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${hours}時間 ${minutes}分`;
 }
 
 /** 同期成否に応じて控えめな状態表示または警告を描画する。 */
