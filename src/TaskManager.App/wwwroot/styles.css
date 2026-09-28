@@ -103,6 +103,9 @@ nav { display: grid; gap: 6px; }
 .time-tracker-main span { margin-top: 4px; color: var(--muted); font-size: 12px; }
 .time-tracker-running { color: var(--green-dark) !important; font-weight: 800; }
 .time-tracker-actions { display: flex; flex: 0 0 auto; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.time-tracker-total { display: grid; align-content: center; margin-right: 6px; min-width: 88px; }
+.time-tracker-total small { color: var(--muted); font-size: 10px; }
+.time-tracker-total strong { font-size: 16px; white-space: nowrap; }
 .time-tracker-warning { border-color: #e1aa65; background: var(--amber-soft); }
 .time-tracker-empty { background: #fafcfb; }
 .time-review-cards { display: grid; gap: 12px; margin-top: 18px; }
@@ -390,6 +393,7 @@ dialog::backdrop { background: rgba(12,25,18,.52); backdrop-filter: blur(3px); }
   .system-incident-card { align-items: stretch; flex-direction: column; }
   .system-incident-actions { justify-content: flex-start; }
   .time-tracker-actions { justify-content: flex-start; }
+  .time-tracker-total { flex-basis: 100%; margin: 0 0 4px; }
   .calendar-widget-actions, .calendar-alert-actions { justify-content: flex-start; }
   .calendar-next-event { white-space: normal; }
   .calendar-embed-frame { height: 540px; }

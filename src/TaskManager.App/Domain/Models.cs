@@ -170,7 +170,7 @@ public sealed class TaskEvaluation
 /// <summary>ダッシュボードへ返す推薦結果を表す。</summary>
 public sealed class RecommendationResult
 {
-    // 推薦、候補評価、カレンダー、現在タイマー、要確認ログを保持する。
+    // 推薦、候補評価、カレンダー、現在タイマー、今日の作業時間、要確認ログを保持する。
     public TaskEvaluation? Recommendation { get; init; }
     [JsonIgnore]
     public IReadOnlyList<TaskEvaluation> Evaluations { get; init; } = [];
@@ -182,6 +182,8 @@ public sealed class RecommendationResult
     public string CalendarError { get; init; } = string.Empty;
     public CalendarWidgetResult CalendarWidget { get; init; } = new();
     public TimeEntryRecord? ActiveTimeEntry { get; set; }
+    public long TodayTotalSeconds { get; set; }
+    public DateTimeOffset TodayTotalGeneratedAt { get; set; }
     public IReadOnlyList<TimeEntryRecord> ReviewTimeEntries { get; set; } = [];
 }
 

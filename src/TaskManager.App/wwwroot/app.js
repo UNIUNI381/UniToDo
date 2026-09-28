@@ -407,7 +407,7 @@ async function loadDashboard() {
   applicationState.dashboardResult = result;
   renderRecommendation(result);
   renderFollowUp(result.followUpTask);
-  renderTimeTracker(result.activeTimeEntry);
+  renderTimeTracker(result.activeTimeEntry, result.todayTotalSeconds, result.todayTotalGeneratedAt);
   renderTimeReviewCards(result.reviewTimeEntries || []);
   renderCalendarWidget(result);
   await loadPendingSystemIncident();
@@ -569,7 +569,10 @@ async function refreshVisibleTimeTracker() {
     if (applicationState.dashboardResult) {
       applicationState.dashboardResult.activeTimeEntry = activeTimeEntry;
     }
-    renderTimeTracker(activeTimeEntry);
+    renderTimeTracker(
+      activeTimeEntry,
+      applicationState.dashboardResult?.todayTotalSeconds,
+      applicationState.dashboardResult?.todayTotalGeneratedAt);
   } catch {
     // 5分周期の通常更新に任せ、短周期取得の一時失敗は通知を増やさない。
   }
@@ -1240,14 +1243,17 @@ function formatCalendarWeekday(value) {
 }
 
 /** ダッシュボードへ現在の作業タイマーと操作を表示する。 */
-function renderTimeTracker(activeTimeEntry) {
-  // タイマーなしでは自由活動開始、実行中では停止・完了・延長を表示する。
+function renderTimeTracker(activeTimeEntry, todayTotalSeconds, todayTotalGeneratedAt) {
+  // 今日の合計を操作の手前へ置き、タイマーなしでは自由活動開始、実行中では停止・完了・延長を表示する。
   const panel = document.getElementById("time-tracker-panel");
+  const safeTotalSeconds = Math.max(0, Math.floor(Number(todayTotalSeconds || 0)));
+  const totalGeneratedAt = todayTotalGeneratedAt || new Date().toISOString();
+  const todayTotalMarkup = `<span class="time-tracker-total" data-today-total-seconds="${safeTotalSeconds}" data-today-total-generated-at="${escapeAttribute(totalGeneratedAt)}" data-today-total-running="${activeTimeEntry ? "true" : "false"}"><small>今日の合計</small><strong>${formatDuration(safeTotalSeconds)}</strong></span>`;
   if (!activeTimeEntry) {
     panel.className = "time-tracker-panel time-tracker-empty";
     panel.innerHTML = `
       <div class="time-tracker-main"><strong>作業タイマーは停止中です</strong></div>
-      <div class="time-tracker-actions"><button type="button" class="secondary-button" data-time-command="free-start">自由活動を開始</button></div>`;
+      <div class="time-tracker-actions">${todayTotalMarkup}<button type="button" class="secondary-button" data-time-command="free-start">自由活動を開始</button></div>`;
   } else {
     const warningActive = Boolean(activeTimeEntry.warningAt);
     panel.className = `time-tracker-panel${warningActive ? " time-tracker-warning" : ""}`;
@@ -1259,6 +1265,7 @@ function renderTimeTracker(activeTimeEntry) {
         ${warningActive ? `<span>長時間継続しています。1時間延長するか停止してください。</span>` : ""}
       </div>
       <div class="time-tracker-actions">
+        ${todayTotalMarkup}
         ${activeTimeEntry.taskIdentifier ? `<button type="button" class="primary-button" data-time-command="complete" data-task="${escapeAttribute(activeTimeEntry.taskIdentifier)}">完了</button>` : ""}
         ${warningActive ? `<button type="button" class="secondary-button" data-time-command="extend" data-time-entry="${escapeAttribute(activeTimeEntry.identifier)}">1時間延長</button>` : ""}
         <button type="button" class="secondary-button" data-time-command="stop" data-time-entry="${escapeAttribute(activeTimeEntry.identifier)}">停止</button>
@@ -1330,12 +1337,21 @@ async function executeTimeEntryCommand(timeEntryIdentifier, commandName) {
 
 /** 作業タイマーの経過表示と実行中ブロック幅を現在時刻へ更新する。 */
 function updateActiveTimeEntryDisplays() {
-  // テキストは秒単位、カレンダーブロックは1時間64pxの現在幅へ更新する。
+  // 経過時間と今日の合計は秒単位、カレンダーブロックは1時間64pxの現在幅へ更新する。
   for (const elapsedElement of document.querySelectorAll("[data-time-entry-elapsed]")) {
     const startTimestamp = Date.parse(elapsedElement.dataset.timeEntryElapsed);
     if (!Number.isFinite(startTimestamp)) continue;
     const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startTimestamp) / 1000));
     elapsedElement.textContent = `計測中 ${formatDuration(elapsedSeconds)}`;
+  }
+  for (const totalElement of document.querySelectorAll("[data-today-total-seconds]")) {
+    // 実行中だけ集計時刻からの経過秒を保存済み合計へ加える。
+    const baseSeconds = Math.max(0, Math.floor(Number(totalElement.dataset.todayTotalSeconds || 0)));
+    const generatedTimestamp = Date.parse(totalElement.dataset.todayTotalGeneratedAt);
+    const additionalSeconds = totalElement.dataset.todayTotalRunning === "true" && Number.isFinite(generatedTimestamp)
+      ? Math.max(0, Math.floor((Date.now() - generatedTimestamp) / 1000))
+      : 0;
+    totalElement.querySelector("strong").textContent = formatDuration(baseSeconds + additionalSeconds);
   }
   for (const activeBlock of document.querySelectorAll(".calendar-time-entry-block[data-active-start][data-day-start]")) {
     const activeStart = new Date(activeBlock.dataset.activeStart);

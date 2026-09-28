@@ -208,6 +208,7 @@ public static class ApiEndpoints
     private static async Task<IResult> GetDashboardAsync(
         RecommendationService recommendationService,
         TimeEntryRepository timeEntryRepository,
+        TimeReportService timeReportService,
         [FromQuery] string? category,
         [FromQuery] string? projectIdentifier,
         [FromQuery] bool? unassignedProject,
@@ -243,6 +244,14 @@ public static class ApiEndpoints
                 unassignedProject == true);
         }
         result.ActiveTimeEntry = await timeEntryRepository.GetActiveAsync(cancellationToken);
+        // 作業時間画面と同じ日次集計から、実行中時間を含む今日の合計を取得する。
+        TimeReportResult todayReport = await timeReportService.GetReportAsync(
+            "day",
+            null,
+            null,
+            cancellationToken);
+        result.TodayTotalSeconds = todayReport.TotalSeconds;
+        result.TodayTotalGeneratedAt = todayReport.GeneratedAt;
         result.ReviewTimeEntries = await timeEntryRepository.GetNeedsReviewAsync(cancellationToken);
         result.CalendarWidget.TimeEntries = await timeEntryRepository.GetEntriesAsync(
             result.CalendarWidget.RangeStart,
