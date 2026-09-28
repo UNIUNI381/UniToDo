@@ -1246,7 +1246,7 @@ function renderTimeTracker(activeTimeEntry) {
   if (!activeTimeEntry) {
     panel.className = "time-tracker-panel time-tracker-empty";
     panel.innerHTML = `
-      <div class="time-tracker-main"><strong>作業タイマーは停止中です</strong><span>タスクを開始するか、自由活動を記録できます。</span></div>
+      <div class="time-tracker-main"><strong>作業タイマーは停止中です</strong></div>
       <div class="time-tracker-actions"><button type="button" class="secondary-button" data-time-command="free-start">自由活動を開始</button></div>`;
   } else {
     const warningActive = Boolean(activeTimeEntry.warningAt);
