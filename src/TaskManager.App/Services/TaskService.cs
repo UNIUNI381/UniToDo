@@ -1022,7 +1022,7 @@ public sealed class TaskService(
             cancellationToken);
     }
 
-    /// <summary>最後の前提タスク完了時に後続タスクの開始可能日を更新する。</summary>
+    /// <summary>最後の前提タスク完了時に後続タスクの依存待ちを解放する。</summary>
     private async Task UpdateReleasedDependentTasksAsync(
         IReadOnlyCollection<string> completedIdentifiers,
         IReadOnlyList<ManagedTask> tasks,
@@ -1041,12 +1041,26 @@ public sealed class TaskService(
             && task.DependencyIdentifiers.Any(newlyCompletedIdentifiers.Contains)
             && task.DependencyIdentifiers.All(allCompletedIdentifiers.Contains)))
         {
-            // 明示された未来の開始可能日は早めず、前提待ち期間を経過評価から除外する。
+            // 依存を持つ待機中は依存待ちとして解放し、その他の状態は維持する。
+            bool releasedWaitingTask = dependentTask.Status == TaskConstants.WaitingStatus;
+            if (releasedWaitingTask)
+            {
+                dependentTask.Status = TaskConstants.ReadyStatus;
+            }
+
+            // 未来の開始可能日は保持し、状態変更だけの場合も保存する。
             if (dependentTask.EarliestStartAt >= currentTime)
             {
-                continue;
+                if (!releasedWaitingTask)
+                {
+                    continue;
+                }
             }
-            dependentTask.EarliestStartAt = currentTime;
+            else
+            {
+                // 前提待ち期間を経過評価から除外するため解放日時を基準にする。
+                dependentTask.EarliestStartAt = currentTime;
+            }
             dependentTask.UpdatedAt = currentTime;
             await repository.SaveTaskAsync(dependentTask, "依存解放", source, cancellationToken);
         }

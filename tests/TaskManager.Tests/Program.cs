@@ -67,6 +67,7 @@ public static class Program
         await RunTestAsync("待機中も優先度を保存し強制表示できる", TestWaitingPriorityAndForcedRecommendationAsync);
         await RunTestAsync("依存タスク未完了を除外する", TestDependencyBlockingAsync);
         await RunTestAsync("最後の前提完了時に後続タスクの開始可能日を更新する", TestDependencyReleaseStartAsync);
+        await RunTestAsync("依存待ちを推薦へ解放し手動待機と未来開始を維持する", TestWaitingDependencyReleaseAsync);
         await RunTestAsync("必要環境の不一致では推薦候補から除外しない", TestRequiredContextDoesNotExcludeAsync);
         await RunTestAsync("開始可能日からの経過と重要度を優先度へ反映する", TestAgingPriorityAsync);
         await RunTestAsync("ダッシュボード推薦を区分とプロジェクト設定状態で絞り込む", TestDashboardRecommendationFilterAsync);
@@ -346,6 +347,89 @@ public static class Program
         Assert(
             preservedFutureTask.EarliestStartAt == StandardTime().AddDays(1),
             "明示された未来の開始可能日が前提完了日時で早められました。");
+    }
+
+    /// <summary>3件の依存完了で待機を解放し、手動待機と開始日時の境界を検証する。</summary>
+    private static async Task TestWaitingDependencyReleaseAsync()
+    {
+        // 複数の完了済み依存と最後の未完了依存を持つ後続を保存する。
+        await using TestDatabase testDatabase = await TestDatabase.CreateAsync();
+        AdjustableTimeProvider timeProvider = new(StandardTime());
+        TaskService taskService = CreateTaskServiceForTimeTest(testDatabase, timeProvider);
+        List<string> dependencyIdentifiers = [];
+        foreach (string identifier in new[] { "WAIT-FIRST", "WAIT-SECOND", "WAIT-LAST" })
+        {
+            ManagedTask dependency = CreateTask(identifier, "先行作業");
+            dependencyIdentifiers.Add(identifier);
+            await taskService.AddTaskAsync(dependency, TaskConstants.SystemSource);
+        }
+        DateTimeOffset releasedAt = StandardTime().AddMinutes(90);
+        foreach (string identifier in new[] { "WAIT-TARGET", "WAIT-EXACT", "WAIT-FUTURE", "WAIT-MANUAL", "WAIT-REVIEW", "WAIT-INBOX", "WAIT-DRAFT", "WAIT-CANCELLED", "WAIT-COMPLETED" })
+        {
+            ManagedTask dependentTask = CreateTask(identifier, "後続作業");
+            dependentTask.Status = identifier switch
+            {
+                "WAIT-REVIEW" => TaskConstants.NeedsReviewStatus,
+                "WAIT-INBOX" => TaskConstants.InboxStatus,
+                "WAIT-DRAFT" => TaskConstants.DraftStatus,
+                "WAIT-CANCELLED" => TaskConstants.CancelledStatus,
+                "WAIT-COMPLETED" => TaskConstants.CompletedStatus,
+                _ => TaskConstants.WaitingStatus
+            };
+            dependentTask.DependencyIdentifiers = identifier == "WAIT-MANUAL" ? [] : [.. dependencyIdentifiers];
+            dependentTask.EarliestStartAt = identifier switch
+            {
+                "WAIT-EXACT" => releasedAt,
+                "WAIT-FUTURE" => releasedAt.AddDays(1),
+                _ => StandardTime()
+            };
+            await taskService.AddTaskAsync(dependentTask, TaskConstants.SystemSource);
+        }
+
+        // 一部の依存が残る間は待機を維持し、推薦へ混入させない。
+        foreach (string identifier in dependencyIdentifiers.Take(2))
+        {
+            await taskService.ExecuteActionAsync("complete", identifier, null, TaskConstants.SystemSource);
+        }
+        ManagedTask blockedTask = (await testDatabase.Repository.GetTaskAsync("WAIT-TARGET"))!;
+        Assert(blockedTask.Status == TaskConstants.WaitingStatus && blockedTask.EarliestStartAt == StandardTime(),
+            "全依存の完了前に待機が解放されました。");
+        timeProvider.SetCurrentTime(releasedAt);
+        RecommendationResult result = await taskService.ExecuteActionAsync(
+            "complete", dependencyIdentifiers.Last(), null, TaskConstants.SystemSource);
+        List<ManagedTask> savedTasks = await testDatabase.Repository.GetTasksAsync();
+        ManagedTask releasedTask = savedTasks.Single(task => task.Identifier == "WAIT-TARGET");
+        Assert(releasedTask.Status == TaskConstants.ReadyStatus && releasedTask.EarliestStartAt == releasedAt,
+            "最後の依存完了後に待機状態と開始可能日が解放されませんでした。");
+        Assert(result.Evaluations.Any(evaluation => evaluation.Task.Identifier == releasedTask.Identifier),
+            "解放されたタスクが推薦候補へ入りませんでした。");
+        Assert(result.Recommendation?.Task.Identifier is "WAIT-TARGET" or "WAIT-EXACT",
+            "開始可能な後続タスクが推薦されませんでした。");
+
+        // 解放時刻ちょうどは推薦でき、未来開始は状態だけ解放して日時到来を待つ。
+        ManagedTask exactTask = savedTasks.Single(task => task.Identifier == "WAIT-EXACT");
+        ManagedTask futureTask = savedTasks.Single(task => task.Identifier == "WAIT-FUTURE");
+        Assert(exactTask.Status == TaskConstants.ReadyStatus && exactTask.EarliestStartAt == releasedAt
+            && result.Evaluations.Any(evaluation => evaluation.Task.Identifier == exactTask.Identifier),
+            "開始可能日が解放時刻と一致する待機タスクが推薦されませんでした。");
+        Assert(futureTask.Status == TaskConstants.ReadyStatus && futureTask.EarliestStartAt == releasedAt.AddDays(1)
+            && result.Evaluations.All(evaluation => evaluation.Task.Identifier != futureTask.Identifier),
+            "未来開始の保持または推薦除外が正しくありません。");
+        RecommendationResult futureResult = CreatePureRecommendationService(releasedAt.AddDays(1)).SelectRecommendation(
+            releasedAt.AddDays(1), new TaskManagerSettings(), savedTasks, []);
+        Assert(futureResult.Evaluations.Any(evaluation => evaluation.Task.Identifier == futureTask.Identifier),
+            "未来の開始可能日が到来しても推薦候補へ入りませんでした。");
+
+        // 手動待機、確認待ち、未整理、下書き、終端状態は実行可能へ変更しない。
+        foreach (string identifier in new[] { "WAIT-MANUAL", "WAIT-REVIEW", "WAIT-INBOX", "WAIT-DRAFT", "WAIT-CANCELLED", "WAIT-COMPLETED" })
+        {
+            ManagedTask preservedTask = savedTasks.Single(task => task.Identifier == identifier);
+            Assert(preservedTask.Status != TaskConstants.ReadyStatus
+                && result.Evaluations.All(evaluation => evaluation.Task.Identifier != identifier),
+                "依存待ち以外のタスクが実行可能へ変更されました。");
+        }
+        Assert(savedTasks.Single(task => task.Identifier == "WAIT-MANUAL").EarliestStartAt == StandardTime(),
+            "依存のない手動待機の開始可能日が変更されました。");
     }
 
     /// <summary>必要環境が現在設定と異なっても推薦対象になることを検証する。</summary>
