@@ -75,6 +75,7 @@ CLIは固定ループバックのヘルスチェックで接続拒否（待受�
 `get TASK-ID`は単一タスクを取得します。すべての`--file`はパスの代わりに`-`を指定すると標準入力のJSONオブジェクトを読みます。空・不正JSON、null・配列は送信前に拒否します。タスク更新の省略・nullの意味はファイル入力と同じです。CLIの標準入出力はUTF-8で、入力先頭のBOMも受け入れます。PowerShell 5.1の日本語パイプ入力では呼出し側の`$OutputEncoding=[Text.Encoding]::UTF8`も必要です。
 
 タスクの`add`・`update`・状態操作と`draft-create`に`--verify`を付けると、CLIが保存後に対象を再取得して照合します。応答は`{saved,verified,identifier,writeResult,readback,warning}`です。確認成功は終了コード0、保存応答を得た後の再取得失敗・不一致は終了コード3で、保存応答と分かる範囲の読戻しを保持します。終了コード3では自動再送しません。`--verify`を省略した既存の応答形式は維持します。
+タスクの追加・更新の検証では、`dependencyIdentifiers`だけは順序を問わず、IDを大文字小文字を区別せず照合します。件数と各IDの出現回数は一致が必要で、欠落・追加・置換は不一致です。保存時の既存仕様として、依存IDの空白除去と重複除去は維持します。他項目の比較と保存応答・読戻し配列の出力順は変更しません。
 
 `--json`は字下げなし・日本語非エスケープのJSONです。`--fields "identifier,title"`はJSON出力を兼ねて指定項目だけを返し、配列の件数とnull・空配列を維持します。PowerShellでは項目一覧を引用符で囲みます。ネストは`recommendation.task.title`のように指定します。未知の項目はエラーですが、null・空配列内部は検証できません。対象は`now/list/get`、`project list`、`draft list/get`、`time active/list/report`です。更新コマンドと`project prepare/resolve`では保存後警告・解決情報の欠落を防ぐため使用できません。項目選択はCLI内の表示処理であり、API・DBの返却仕様は変更しません。
 

@@ -486,10 +486,28 @@ public sealed class CliRunner
         foreach (string field in fields.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (!TryGetProperty(expected, field, out JsonElement expectedValue)
-                || !TryGetProperty(actual, field, out JsonElement actualValue)
-                || !JsonElement.DeepEquals(expectedValue, actualValue)) return false;
+                || !TryGetProperty(actual, field, out JsonElement actualValue)) return false;
+            // 依存IDだけは順序を持たず、他の項目には従来のJSON比較を使う。
+            bool matches = string.Equals(field, "dependencyIdentifiers", StringComparison.OrdinalIgnoreCase)
+                ? MatchDependencies(expectedValue, actualValue)
+                : JsonElement.DeepEquals(expectedValue, actualValue);
+            if (!matches) return false;
         }
         return true;
+    }
+
+    /// <summary>依存IDを既存のID照合規則で比較し、順序差だけを許容する。</summary>
+    private static bool MatchDependencies(JsonElement expected, JsonElement actual)
+    {
+        // 集合化で欠落や重複件数の相違を隠さず、不正な型も不一致にする。
+        if (expected.ValueKind != JsonValueKind.Array || actual.ValueKind != JsonValueKind.Array
+            || expected.GetArrayLength() != actual.GetArrayLength()) return false;
+        if (expected.EnumerateArray().Any(identifier => identifier.ValueKind != JsonValueKind.String)
+            || actual.EnumerateArray().Any(identifier => identifier.ValueKind != JsonValueKind.String)) return false;
+        return expected.EnumerateArray().Select(identifier => identifier.GetString()!)
+            .Order(StringComparer.OrdinalIgnoreCase)
+            .SequenceEqual(actual.EnumerateArray().Select(identifier => identifier.GetString()!)
+                .Order(StringComparer.OrdinalIgnoreCase), StringComparer.OrdinalIgnoreCase);
     }
 
     /// <summary>更新入力と同じ規則でJSON項目を大文字小文字を問わず探す。</summary>

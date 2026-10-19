@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using TaskManager.Cli;
 
 namespace TaskManager.Tests;
@@ -15,6 +16,9 @@ public static class CliVerifiedWriteTests
     /// <summary>追加、更新、状態変更、下書きの検証結果を確認する。</summary>
     public static async Task VerifyAsync()
     {
+        // 依存一覧だけの順序差と、実際の保存内容の相違を区別する。
+        await VerifyDependenciesAsync();
+
         // タスク追加と部分更新は保存応答と独立したGETが一致した場合だけ検証済みにする。
         using (ResponseHandler handler = new(SavedTask, SavedTask))
         {
@@ -118,9 +122,71 @@ public static class CliVerifiedWriteTests
         }
     }
 
+    /// <summary>依存IDの順序、件数、値と他項目の相違をCLI境界で検証する。</summary>
+    private static async Task VerifyDependenciesAsync()
+    {
+        // 実データを使わず、入力順とDBの読戻し順が異なる応答を再現する。
+        string[] dependencies = ["TASK-300", "DRAFT-100", "TASK-200"];
+        foreach ((string[] expected, string[] actual, bool verified) in new (string[], string[], bool)[]
+        {
+            (dependencies, ["DRAFT-100", "TASK-200", "TASK-300"], true),
+            (dependencies, ["task-200", "task-300", "draft-100"], true),
+            ([], [], true),
+            (["TASK-300"], ["TASK-300"], true),
+            (dependencies, ["DRAFT-100", "TASK-300"], false),
+            (dependencies, ["DRAFT-100", "TASK-200", "TASK-OTHER"], false),
+            (dependencies, ["DRAFT-100", "TASK-200", "TASK-300", "TASK-OTHER"], false),
+            (dependencies, ["DRAFT-100", "TASK-200", "TASK-300", "TASK-300"], false),
+            (["TASK-300", "TASK-300", "TASK-200"], ["TASK-300", "TASK-200", "TASK-200"], false)
+        })
+        {
+            JsonObject writeResult = JsonNode.Parse(SavedTask)!.AsObject();
+            writeResult["dependencyIdentifiers"] = JsonSerializer.SerializeToNode(expected);
+            JsonObject readback = writeResult.DeepClone().AsObject();
+            readback["dependencyIdentifiers"] = JsonSerializer.SerializeToNode(actual);
+            foreach (string command in new[] { "add", "update" })
+            {
+                using ResponseHandler handler = new(writeResult.ToJsonString(), readback.ToJsonString());
+                string[] arguments = command == "add" ? ["add"] : ["update", "TASK-101"];
+                (int exitCode, JsonElement output, string error) = await RunAsync(handler,
+                    [.. arguments, "--file", "-", "--verify", "--json"],
+                    JsonSerializer.Serialize(new { DependencyIdentifiers = expected }));
+                Assert(exitCode == (verified ? 0 : 3) && output.GetProperty("saved").GetBoolean()
+                    && output.GetProperty("verified").GetBoolean() == verified,
+                    $"{command}の依存ID検証が不正です: {readback}");
+                Assert(handler.Mutations == 1 && handler.Readbacks == 1, "保存または読戻しを繰り返しました。");
+                Assert(verified || error.Contains("自動再送せず", StringComparison.Ordinal), "不一致時の再送防止警告が失われました。");
+                Assert(output.GetProperty("writeResult").GetProperty("dependencyIdentifiers").GetArrayLength() == expected.Length,
+                    "比較処理が保存応答を書き換えました。");
+            }
+        }
+
+        // 同じ依存関係でも、変更した他項目や依存配列の不正な型は不一致として扱う。
+        JsonObject saved = JsonNode.Parse(SavedTask)!.AsObject();
+        saved["dependencyIdentifiers"] = JsonSerializer.SerializeToNode(dependencies);
+        foreach ((string field, JsonNode? value) in new (string, JsonNode?)[]
+        {
+            ("details", JsonValue.Create("旧内容")),
+            ("deadlineAt", JsonValue.Create("2026-10-20T20:00:00+09:00")),
+            ("projectIdentifier", JsonValue.Create("PROJECT-OTHER")),
+            ("dependencyIdentifiers", null),
+            ("dependencyIdentifiers", JsonNode.Parse("[1,2,3]"))
+        })
+        {
+            JsonObject readback = saved.DeepClone().AsObject();
+            readback["dependencyIdentifiers"] = JsonSerializer.SerializeToNode(dependencies.Reverse());
+            readback[field] = value;
+            using ResponseHandler handler = new(saved.ToJsonString(), readback.ToJsonString());
+            (int exitCode, JsonElement output, _) = await RunAsync(handler,
+                ["update", "TASK-101", "--file", "-", "--verify", "--json"], saved.ToJsonString());
+            Assert(exitCode == 3 && output.GetProperty("saved").GetBoolean()
+                && !output.GetProperty("verified").GetBoolean(), $"{field}の不一致を見逃しました。");
+        }
+    }
+
     /// <summary>模擬HTTP応答でCLIを実行し、JSONと標準エラーを取得する。</summary>
-    private static async Task<(int ExitCode, JsonElement Output, string Error)> RunAsync(
-        ResponseHandler handler,
+    internal static async Task<(int ExitCode, JsonElement Output, string Error)> RunAsync(
+        HttpMessageHandler handler,
         string[] arguments,
         string input)
     {

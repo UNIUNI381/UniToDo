@@ -57,6 +57,7 @@ public static class Program
         await RunTestAsync("Codex会話の重複送信・承認・復旧を管理する", CodexChatTests.VerifyAsync);
         await RunTestAsync("CLIの標準入力・選択JSON・単一取得を検証する", CliJsonTests.VerifyAsync);
         await RunTestAsync("CLIの書込み後読戻しと再送防止を検証する", CliVerifiedWriteTests.VerifyAsync);
+        await RunTestAsync("CLIの依存順序を一時DBへの保存と読戻しで検証する", TestVerifiedDependenciesAsync);
         await RunTestAsync("追加バックアップの世代保持・復元・OFF・失敗再試行を検証する", ExternalBackupTests.VerifyAsync);
         await RunTestAsync("日付だけの期限は20時とし明示時刻と解除を保持する", TestDeadlineInputAsync);
         await RunTestAsync("Tailscale Serveとローカル接続の信頼境界を守る", RemoteAccessTests.VerifyAsync);
@@ -2042,9 +2043,11 @@ public static class Program
         try
         {
             await File.WriteAllTextAsync(inputPath, "{\"deadlineAt\":\"2026-09-10T18:00:00+09:00\"}");
-            using HttpClient client = new(new PartialUpdateMessageHandler(taskService)) { BaseAddress = new Uri("http://127.0.0.1:48120") };
+            using PartialUpdateMessageHandler handler = new(taskService, testDatabase.Repository);
+            using HttpClient client = new(handler) { BaseAddress = new Uri("http://127.0.0.1:48120") };
             CliRunner runner = new(client);
             Assert(await runner.RunAsync(["update", original.Identifier, "--file", inputPath, "--json"]) == 0, "CLI更新が失敗しました。");
+            Assert(handler.Changes.EnumerateObject().Count() == 1, "CLIが省略項目を補完しました。");
             ManagedTask saved = (await testDatabase.Repository.GetTaskAsync(original.Identifier))!;
             Assert(saved.DeadlineAt == DateTimeOffset.Parse("2026-09-10T18:00:00+09:00"), "指定期限が保存されませんでした。");
             Assert(saved.Title == original.Title && saved.Details == original.Details && saved.Status == original.Status
@@ -2077,23 +2080,80 @@ public static class Program
         }
     }
 
-    /// <summary>CLIが省略値を追加しないことを確認して更新サービスへ接続する。</summary>
-    private sealed class PartialUpdateMessageHandler(TaskService taskService) : HttpMessageHandler
+    /// <summary>依存IDの入力順と保存層の読戻し順が異なっても部分更新を検証する。</summary>
+    private static async Task TestVerifiedDependenciesAsync()
     {
-        // 一時DBに対する更新サービスを保持する。
-        private readonly TaskService service = taskService;
+        // 有効な依存先3件と対象を一時DBに作り、正本データへは接続しない。
+        await using TestDatabase database = await TestDatabase.CreateAsync();
+        TaskService service = CreateTaskServiceForTest(database, StandardTime());
+        string[] dependencies = ["TASK-300", "DRAFT-100", "TASK-200"];
+        foreach (string identifier in dependencies)
+            await service.AddTaskAsync(CreateTask(identifier, "前提"), TaskConstants.SystemSource);
+        ManagedTask original = CreateTask("verified-dependencies", "保持する名称");
+        original.Details = "保持する詳細";
+        original.DeadlineAt = StandardTime();
+        await service.AddTaskAsync(original, TaskConstants.SystemSource);
 
+        // 依存だけ、複数項目、重複入力の正規化を同じCLI・Service・SQLite経路で検査する。
+        foreach (object changes in new object[]
+        {
+            new { DependencyIdentifiers = dependencies },
+            new { DependencyIdentifiers = dependencies, Details = "更新した詳細", DeadlineAt = (DateTimeOffset?)null },
+            new { DependencyIdentifiers = new[] { "TASK-300", "DRAFT-100", "TASK-200", "task-300" } }
+        })
+        {
+            ManagedTask before = (await database.Repository.GetTaskAsync(original.Identifier))!;
+            using PartialUpdateMessageHandler handler = new(service, database.Repository);
+            (int exitCode, JsonElement output, _) = await CliVerifiedWriteTests.RunAsync(handler,
+                ["update", original.Identifier, "--file", "-", "--verify", "--json"], JsonSerializer.Serialize(changes));
+            Assert(exitCode == 0 && output.GetProperty("saved").GetBoolean()
+                && output.GetProperty("verified").GetBoolean(), "保存層による依存順序変更を検証できません。");
+            string[] writeDependencies = output.GetProperty("writeResult").GetProperty("dependencyIdentifiers")
+                .EnumerateArray().Select(identifier => identifier.GetString()!).ToArray();
+            string[] readDependencies = output.GetProperty("readback").GetProperty("dependencyIdentifiers")
+                .EnumerateArray().Select(identifier => identifier.GetString()!).ToArray();
+            Assert(writeDependencies.SequenceEqual(dependencies)
+                && readDependencies.SequenceEqual(["DRAFT-100", "TASK-200", "TASK-300"]),
+                "依存順序差または既存の重複除去を再現できません。");
+            ManagedTask after = (await database.Repository.GetTaskAsync(original.Identifier))!;
+            Assert(after.Title == before.Title && after.ProjectIdentifier == before.ProjectIdentifier,
+                "未指定の項目が変更されました。");
+            bool detailsChanged = handler.Changes.TryGetProperty("Details", out _);
+            Assert(after.Details == (detailsChanged ? "更新した詳細" : before.Details)
+                && after.DeadlineAt == (detailsChanged ? null : before.DeadlineAt), "詳細・期限の更新または保持が不正です。");
+        }
+    }
+
+    /// <summary>CLIの部分更新と独立した読戻しを一時DBへ接続する。</summary>
+    private sealed class PartialUpdateMessageHandler(TaskService taskService, TaskRepository taskRepository) : HttpMessageHandler
+    {
+        // 一時DBに対する更新サービス、保存層と最後に送信された変更項目を保持する。
+        private readonly TaskService service = taskService;
+        private readonly TaskRepository repository = taskRepository;
+        public JsonElement Changes { get; private set; }
+
+        /// <summary>更新要求をサービスへ、対象タスクのGETを保存層へ渡す。</summary>
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            // 締切以外が送信されていないことを検査して通常の更新経路を呼ぶ。
-            if (request.Method == HttpMethod.Get)
+            // ヘルス確認と対象タスクの取得を区別し、実際の読戻し順序を使う。
+            if (request.RequestUri!.AbsolutePath == "/api/v1/health")
             {
                 return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent("{}") };
             }
-            JsonElement changes = JsonSerializer.Deserialize<JsonElement>(await request.Content!.ReadAsStringAsync(cancellationToken));
-            Assert(request.Method == HttpMethod.Put && changes.EnumerateObject().Count() == 1, "CLIが省略項目を補完しました。");
-            ManagedTask result = await service.UpdateTaskAsync("partial-update", changes, TaskConstants.SystemSource, cancellationToken);
-            return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(result)) };
+            string identifier = Uri.UnescapeDataString(request.RequestUri.Segments.Last());
+            ManagedTask? result;
+            if (request.Method == HttpMethod.Get)
+                result = await repository.GetTaskAsync(identifier, cancellationToken);
+            else
+            {
+                Assert(request.Method == HttpMethod.Put, "更新以外の要求を受信しました。");
+                Changes = JsonSerializer.Deserialize<JsonElement>(await request.Content!.ReadAsStringAsync(cancellationToken));
+                result = await service.UpdateTaskAsync(identifier, Changes, TaskConstants.SystemSource, cancellationToken);
+            }
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(result, new JsonSerializerOptions(JsonSerializerDefaults.Web)))
+            };
         }
     }
 
