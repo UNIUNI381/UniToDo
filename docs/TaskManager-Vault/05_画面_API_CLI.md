@@ -76,7 +76,7 @@ CLIは固定ループバックのヘルスチェックで接続拒否（待受�
 
 タスクの`add`・`update`・状態操作と`draft-create`に`--verify`を付けると、CLIが保存後に対象を再取得して照合します。応答は`{saved,verified,identifier,writeResult,readback,warning}`です。確認成功は終了コード0、保存応答を得た後の再取得失敗・不一致は終了コード3で、保存応答と分かる範囲の読戻しを保持します。終了コード3では自動再送しません。`--verify`を省略した既存の応答形式は維持します。
 
-`--json`は字下げなし・日本語非エスケープのJSONです。`--fields identifier,title`はJSON出力を兼ねて指定項目だけを返し、配列の件数とnull・空配列を維持します。ネストは`recommendation.task.title`のように指定します。未知の項目はエラーですが、null・空配列内部は検証できません。対象は`now/list/get`、`project list`、`draft list/get`、`time active/list/report`です。更新コマンドと`project prepare/resolve`では保存後警告・解決情報の欠落を防ぐため使用できません。項目選択はCLI内の表示処理であり、API・DBの返却仕様は変更しません。
+`--json`は字下げなし・日本語非エスケープのJSONです。`--fields "identifier,title"`はJSON出力を兼ねて指定項目だけを返し、配列の件数とnull・空配列を維持します。PowerShellでは項目一覧を引用符で囲みます。ネストは`recommendation.task.title`のように指定します。未知の項目はエラーですが、null・空配列内部は検証できません。対象は`now/list/get`、`project list`、`draft list/get`、`time active/list/report`です。更新コマンドと`project prepare/resolve`では保存後警告・解決情報の欠落を防ぐため使用できません。項目選択はCLI内の表示処理であり、API・DBの返却仕様は変更しません。
 
 
 ## AI操作上の境界

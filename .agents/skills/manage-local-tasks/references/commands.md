@@ -26,7 +26,7 @@ UniToDo専用会話では専用PATHの`taskctl`を直接実行する。通常の
 
 - すべての`--file`入力は`--file -`で標準入力のJSONオブジェクトを読める。既存ファイル入力も使用可能。
 - `--json`は字下げなし・日本語をUnicodeエスケープしないJSONを返す。
-- 読取では`--fields identifier,title,projectIdentifier,status`で必要項目だけを選ぶ。`--json`は省略できる。ネストは`recommendation.task.title`形式。配列の件数、null、空配列を保持する。存在しない項目はエラー。ただしnull・空配列の内部の項目名は検証できない。
+- 読取では`--fields "identifier,title,projectIdentifier,status"`で必要項目だけを選ぶ。PowerShellでは値を必ず引用符で囲む。`--json`は省略できる。ネストは`recommendation.task.title`形式。配列の件数、null、空配列を保持する。存在しない項目はエラー。ただしnull・空配列の内部の項目名は検証できない。
 - 対応する読取は`now/list/get`、`project list`、`draft list/get`、`time active/list/report`。`project prepare/resolve`と更新応答は確認情報・警告を省略しない。
 - 書込み前後の確認にはID、projectIdentifier、状態、変更対象を必ず含める。単一タスクは`get ID`を使う。
 - タスクの追加・更新・状態操作と下書き登録の`--verify`はCLI内で保存後に再取得する。JSONは`{saved,verified,identifier,writeResult,readback,warning}`で、`verified: true`なら別途`get`しない。確認失敗は保存済みの可能性を保持して終了コード3となるため、自動再送しない。
@@ -35,7 +35,7 @@ PowerShell 7での例（5.1では日本語を保つため同じコマンドの�
 
 ```powershell
 '{"details":"確認済みの補足"}' | taskctl update TASK-ID --file - --json
-taskctl get TASK-ID --fields identifier,projectIdentifier,status,details
+taskctl get TASK-ID --fields "identifier,projectIdentifier,status,details"
 ```
 
 長文や引用符を含むJSONには、PowerShellの単一引用符のヒアストリングを使う。本文中の`$`やバッククォートを展開しない。
@@ -47,6 +47,8 @@ UniToDo専用会話では権限不足を報告して停止する。通常のCode
 承認prefixは`powershell -NoProfile -ExecutionPolicy Bypass -File <スキル絶対パス>\scripts\invoke-taskctl.ps1`までに限定し、コマンド名やタスクIDは含めない。ユーザーが継続利用を許可したルールは`~/.codex/rules/`へ保存すると全プロジェクトで利用できる。ルールを手動追加した後はCodexを再起動する。ルールは文字列で照合されるため、インストーラーは同じラッパーのパスを`\`と`/`の両表記で登録する。引数の並びを固定し、複雑なPowerShell処理や別の操作とまとめず単独で呼ぶ。
 
 終了コード126は実行・ローカル接続の権限拒否。許可ルールと実行指定を確認し、許可されていない別経路で迂回しない。`--help`の成功やサンドボックス内のプロセス検索だけでは本体の稼働・接続可否を判定しない。
+
+`--fields`の値を引用符で囲まないカンマ区切りにすると、PowerShellの配列構文になり、単独コマンドの許可ルールが適用されない場合がある。`--fields "identifier,status"`のように1つの文字列として渡す。
 
 外側のPowerShellがネイティブ終了コード126を実行ツール上の1へ変える場合がある。実行ツールの1だけで権限拒否を判定せず、標準エラーの診断も確認する。正確な終了コードが必要な呼出しでは外側で`exit $LASTEXITCODE`を明示するが、複合コマンドの許可判定は単独のラッパー呼出しと異なる可能性がある。
 
