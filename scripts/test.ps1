@@ -1,4 +1,4 @@
-$ProjectRoot = Split-Path -Parent $PSScriptRoot
+﻿$ProjectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "common.ps1")
 
 # ビルド、実行テスト、静的検査を順に実行する。 ASCII.
@@ -12,6 +12,7 @@ try {
     # 日本語の校正テストをPowerShell 5.1でも同じ文字コードで読み込む。
     $correctionTests = Get-Content -Raw -Encoding utf8 (Join-Path $ProjectRoot "tests\Test-OllamaCorrection.ps1")
     & ([ScriptBlock]::Create($correctionTests)) -ProjectRoot $ProjectRoot
+    & (Join-Path $ProjectRoot "tests\Test-InstallerCodex.ps1") -ProjectRoot $ProjectRoot
     & (Join-Path $PSScriptRoot "verify.ps1")
 }
 finally {

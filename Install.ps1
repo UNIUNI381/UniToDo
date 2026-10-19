@@ -113,6 +113,69 @@ function Assert-SafeSkillDestination {
     }
 }
 
+function Install-CodexTaskIntegration {
+    # ユーザー用Skillと、そのラッパーだけを許可するCodexルールを導入する。
+    [CmdletBinding(SupportsShouldProcess = $true)]
+    param(
+        [Parameter(Mandatory = $true)][string]$RepositorySkill,
+        [Parameter(Mandatory = $true)][string]$UserProfileDirectory,
+        [Parameter(Mandatory = $true)][string]$CodexDirectory,
+        [switch]$OverwriteCodexSkill,
+        [switch]$SkipCodexSkill
+    )
+
+    if ($SkipCodexSkill) { return }
+
+    # 既存Skillは指定された場合だけ置き換え、利用可能なラッパーの場所を確定する。
+    $userSkillRoot = Join-Path $UserProfileDirectory ".agents\skills"
+    $userSkillDestination = Join-Path $userSkillRoot "manage-local-tasks"
+    Assert-SafeSkillDestination -SkillRoot $userSkillRoot -SkillDestination $userSkillDestination
+    $normalizedRepositorySkill = [System.IO.Path]::GetFullPath($RepositorySkill).TrimEnd('\')
+    $normalizedUserSkill = [System.IO.Path]::GetFullPath($userSkillDestination).TrimEnd('\')
+    if ([string]::Equals($normalizedRepositorySkill, $normalizedUserSkill, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Output "repo内Skillが既にユーザーSkillの場所にあるため、コピーは不要です: $userSkillDestination"
+    }
+    elseif ((Test-Path -LiteralPath $userSkillDestination) -and -not $OverwriteCodexSkill) {
+        Write-Warning "既存のCodex Skillは変更しませんでした。置き換える場合は -OverwriteCodexSkill を指定してください: $userSkillDestination"
+    }
+    elseif ($PSCmdlet.ShouldProcess($userSkillDestination, "manage-local-tasks Skillをインストール")) {
+        New-Item -ItemType Directory -Path $userSkillRoot -Force | Out-Null
+        if (Test-Path -LiteralPath $userSkillDestination) {
+            Remove-Item -LiteralPath $userSkillDestination -Recurse -Force
+        }
+        Copy-Item -LiteralPath $RepositorySkill -Destination $userSkillDestination -Recurse -Force
+    }
+
+    # 存在するラッパーだけを対象にし、JSON文字列化で空白・日本語・引用符を安全に保持する。
+    $wrapperPath = Join-Path $normalizedUserSkill "scripts\invoke-taskctl.ps1"
+    if (-not $WhatIfPreference -and -not (Test-Path -LiteralPath $wrapperPath -PathType Leaf)) {
+        Write-Warning "操作ラッパーがないためCodex許可ルールを登録しませんでした: $wrapperPath"
+        return
+    }
+    $commandPattern = ConvertTo-Json -InputObject @(
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $wrapperPath
+    ) -Compress
+    $ruleText = "# UniToDo taskctl wrapper" + [Environment]::NewLine +
+        'prefix_rule(pattern=' + $commandPattern + ', decision="allow")' + [Environment]::NewLine
+    $ruleDirectory = Join-Path $CodexDirectory "rules"
+    $rulePath = Join-Path $ruleDirectory "unitodo-taskctl.rules"
+
+    # 既存の共通ルールや独自編集を保持し、同じルールの再導入では書き込まない。
+    if (Test-Path -LiteralPath $rulePath) {
+        if ([System.IO.File]::ReadAllText($rulePath) -ne $ruleText) {
+            Write-Warning "既存のCodex許可ルールは変更しませんでした。登録先と内容を確認してください: $rulePath"
+            return
+        }
+    }
+    elseif ($PSCmdlet.ShouldProcess($rulePath, "UniToDo操作ラッパーを全プロジェクトで許可するルールを登録")) {
+        New-Item -ItemType Directory -Path $ruleDirectory -Force | Out-Null
+        [System.IO.File]::WriteAllText($rulePath, $ruleText, (New-Object System.Text.UTF8Encoding($false)))
+    }
+    if (-not $WhatIfPreference) {
+        Write-Output "Codex許可ルール: $rulePath。反映するにはCodexを再起動してください。"
+    }
+}
+
 function Stop-InstalledTaskManager {
     # 更新対象と同じ絶対パスで動作中のTask Managerだけを停止する。
     param([Parameter(Mandatory = $true)][string]$ExecutablePath)
@@ -212,28 +275,15 @@ if (-not (Test-PathEntryExists -PathEntries $pathEntries -DirectoryPath $install
     }
 }
 
-# 別の作業フォルダーでも使えるようrepo内Skillをユーザー領域へコピーする。
+# 別の作業フォルダーでも使えるようSkillと専用許可ルールをユーザー領域へ導入する。
 if (-not $SkipCodexSkill) {
     $userProfileDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile)
-    $userSkillRoot = Join-Path $userProfileDirectory ".agents\skills"
-    $userSkillDestination = Join-Path $userSkillRoot "manage-local-tasks"
-    Assert-SafeSkillDestination -SkillRoot $userSkillRoot -SkillDestination $userSkillDestination
-    $normalizedRepositorySkill = [System.IO.Path]::GetFullPath($repositorySkill).TrimEnd('\')
-    $normalizedUserSkill = [System.IO.Path]::GetFullPath($userSkillDestination).TrimEnd('\')
-
-    if ([string]::Equals($normalizedRepositorySkill, $normalizedUserSkill, [System.StringComparison]::OrdinalIgnoreCase)) {
-        Write-Output "repo内Skillが既にユーザーSkillの場所にあるため、コピーは不要です: $userSkillDestination"
+    $codexDirectory = $env:CODEX_HOME
+    if ([string]::IsNullOrWhiteSpace($codexDirectory)) {
+        $codexDirectory = Join-Path $userProfileDirectory ".codex"
     }
-    elseif ((Test-Path -LiteralPath $userSkillDestination) -and -not $OverwriteCodexSkill) {
-        Write-Warning "既存のCodex Skillは変更しませんでした。置き換える場合は -OverwriteCodexSkill を指定してください: $userSkillDestination"
-    }
-    elseif ($PSCmdlet.ShouldProcess($userSkillDestination, "manage-local-tasks Skillをインストール")) {
-        New-Item -ItemType Directory -Path $userSkillRoot -Force | Out-Null
-        if (Test-Path -LiteralPath $userSkillDestination) {
-            Remove-Item -LiteralPath $userSkillDestination -Recurse -Force
-        }
-        Copy-Item -LiteralPath $repositorySkill -Destination $userSkillDestination -Recurse -Force
-    }
+    Install-CodexTaskIntegration -RepositorySkill $repositorySkill -UserProfileDirectory $userProfileDirectory `
+        -CodexDirectory $codexDirectory -OverwriteCodexSkill:$OverwriteCodexSkill -WhatIf:$WhatIfPreference
 }
 
 # インストール後にアプリを起動し、次に行う疎通確認を案内する。
