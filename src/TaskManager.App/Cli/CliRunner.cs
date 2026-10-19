@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Json;
+using System.Net.Sockets;
 using System.Text.Json;
 using TaskManager.Domain;
 
@@ -95,6 +96,12 @@ public sealed class CliRunner
             WriteWarning(response, commandName);
             if (response is VerifiedWriteResult verification && !verification.Verified) return 3;
             return IsProjectClarificationRequired(commandName, response) ? 2 : 0;
+        }
+        catch (UnauthorizedAccessException permissionError)
+        {
+            // 権限不足は未起動や通常のコマンド失敗と区別して呼出元へ返す。
+            Console.Error.WriteLine($"エラー: {permissionError.Message}");
+            return 126;
         }
         catch (Exception commandError)
         {
@@ -756,7 +763,9 @@ public sealed class CliRunner
                 // 未インストールの頒布物では監視親の直接起動へフォールバックする。
                 ProcessStartInfo watchdogStartInformation = new(applicationPath)
                 {
-                    UseShellExecute = true
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    WindowStyle = ProcessWindowStyle.Hidden
                 };
                 watchdogStartInformation.ArgumentList.Add("--watchdog");
                 Process.Start(watchdogStartInformation);
@@ -806,17 +815,22 @@ public sealed class CliRunner
     /// <summary>ヘルスAPIが応答するか確認する。</summary>
     private async Task<bool> IsServerAvailableAsync(CancellationToken cancellationToken)
     {
-        // 接続エラーは停止中として扱う。
+        // 接続先が待受していない場合だけ停止中とし、権限拒否や応答エラーでは起動しない。
         try
         {
             using HttpResponseMessage response = await httpClient.GetAsync("/api/v1/health", cancellationToken);
-            return response.IsSuccessStatusCode;
+            response.EnsureSuccessStatusCode();
+            return true;
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException connectionError) when (
+            connectionError.GetBaseException() is SocketException { SocketErrorCode: SocketError.AccessDenied })
         {
-            return false;
+            throw new UnauthorizedAccessException(
+                "UniToDoへのローカル接続が権限で拒否されました (127.0.0.1:48120)。サンドボックスのネットワーク権限を確認してください。",
+                connectionError);
         }
-        catch (TaskCanceledException)
+        catch (HttpRequestException connectionError) when (
+            connectionError.GetBaseException() is SocketException { SocketErrorCode: SocketError.ConnectionRefused })
         {
             return false;
         }

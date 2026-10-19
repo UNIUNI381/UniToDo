@@ -25,6 +25,11 @@ function Find-TaskControlExecutable {
 $taskControlExecutable = Find-TaskControlExecutable
 try {
     & $taskControlExecutable @TaskArguments
+    if ($LASTEXITCODE -eq 126) {
+        # ローカル接続拒否でも実行拒否と同じ限定的な再実行手順を案内する。
+        [Console]::Error.WriteLine(
+            "taskctl access was denied. Re-run this same wrapper command with narrowly scoped elevated sandbox permission.")
+    }
     exit $LASTEXITCODE
 }
 catch {

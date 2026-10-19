@@ -42,7 +42,7 @@ taskctl get TASK-ID --fields identifier,projectIdentifier,status,details
 
 ## 権限エラー
 
-UniToDo専用会話では権限不足を報告して停止する。通常のCodexでラッパー実行が拒否されたら、同じラッパーを`require_escalated`で再実行する。承認prefixは`powershell -NoProfile -ExecutionPolicy Bypass -File <スキル絶対パス>\scripts\invoke-taskctl.ps1`までに限定する。
+UniToDo専用会話では権限不足を報告して停止する。通常のCodexでラッパーの実行・ローカル接続が拒否されたら（終了コード126）、同じラッパーを`require_escalated`で再実行する。承認prefixは`powershell -NoProfile -ExecutionPolicy Bypass -File <スキル絶対パス>\scripts\invoke-taskctl.ps1`までに限定する。`--help`の成功やサンドボックス内のプロセス検索だけでは本体の稼働・接続可否を判定しない。
 
 ## PowerShell 5.1
 

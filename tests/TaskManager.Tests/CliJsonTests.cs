@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using TaskManager.Cli;
@@ -10,6 +11,9 @@ public static class CliJsonTests
 {
     public static async Task VerifyAsync()
     {
+        // 接続権限やヘルス応答の失敗では、タスク取得と自動起動へ進まないことを確認する。
+        await VerifyConnectionFailuresAsync();
+
         // 各JSON入力コマンドがファイルなしで日本語・引用符・nullを保持することを確認する。
         string[][] commands = [
             ["add"], ["update", "sample"], ["draft-create"], ["project", "create"],
@@ -92,6 +96,42 @@ public static class CliJsonTests
         }
     }
 
+    private static async Task VerifyConnectionFailuresAsync()
+    {
+        // OSの接続拒否、応答拒否、時間切れ、キャンセルを実ネットワークなしで再現する。
+        foreach ((Exception? failure, HttpStatusCode healthStatus, int expectedExitCode) in new (Exception?, HttpStatusCode, int)[]
+        {
+            (new HttpRequestException("接続失敗", new SocketException((int)SocketError.AccessDenied)), HttpStatusCode.OK, 126),
+            (null, HttpStatusCode.Forbidden, 1),
+            (null, HttpStatusCode.ServiceUnavailable, 1),
+            (new TaskCanceledException("時間切れ"), HttpStatusCode.OK, 1),
+            (new OperationCanceledException("キャンセル"), HttpStatusCode.OK, 1)
+        })
+        {
+            using RecordingHandler handler = new() { HealthFailure = failure, HealthStatus = healthStatus };
+            TextWriter originalError = Console.Error;
+            using StringWriter error = new();
+            using StringWriter output = new();
+            TextWriter originalOutput = Console.Out;
+            using HttpClient client = new(handler);
+            try
+            {
+                Console.SetError(error);
+                Console.SetOut(output);
+                int exitCode = await new CliRunner(client).RunAsync(["list", "--status", "実行中", "--json"]);
+                Assert(exitCode == expectedExitCode, "接続失敗の終了コードが不正です。");
+                Assert(handler.Requests == 1 && handler.Mutations == 0 && output.ToString().Length == 0,
+                    "接続失敗後に自動起動待ちまたはタスクAPIへ進みました。");
+                Assert(!error.ToString().Contains("起動していません"), "接続失敗を未起動と誤診しています。");
+            }
+            finally
+            {
+                Console.SetError(originalError);
+                Console.SetOut(originalOutput);
+            }
+        }
+    }
+
     private static async Task<(int ExitCode, string Output)> RunAsync(RecordingHandler handler, string[] arguments, string input)
     {
         // コンソールだけを一時置換し、本番と同じCLI経路を偽HTTPへ接続する。
@@ -132,12 +172,20 @@ public static class CliJsonTests
         public string? LastPath { get; private set; }
         public int Mutations { get; private set; }
         public int Requests { get; private set; }
+        // ヘルスチェックに限って再現する接続例外とHTTP状態を保持する。
+        public Exception? HealthFailure { get; init; }
+        public HttpStatusCode HealthStatus { get; init; } = HttpStatusCode.OK;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             // 実サーバーに接続せず、送信JSONと取得先を観測する。
             Requests++;
             LastPath = request.RequestUri!.AbsolutePath;
+            if (LastPath == "/api/v1/health")
+            {
+                if (HealthFailure is not null) throw HealthFailure;
+                return new(HealthStatus) { Content = new StringContent("{}", Encoding.UTF8, "application/json") };
+            }
             if (request.Method != HttpMethod.Get)
             {
                 Mutations++;
