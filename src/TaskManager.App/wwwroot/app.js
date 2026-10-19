@@ -1696,6 +1696,16 @@ function renderTaskDependencyGraph(filteredTasks) {
   // 中止タスクを除外しつつ、絞り込み外の先行タスクも補助表示して処理順を保つ。
   const dependencyPanel = document.getElementById("task-dependency-panel");
   const wasOpen = dependencyPanel.open;
+  // 同じ系列の再描画で利用者の横位置を失わないよう、初期化済みの位置だけ引き継ぐ。
+  const previousScrollPositions = new Map(Array.from(dependencyPanel.querySelectorAll(".dependency-component-scroll"))
+    .filter(function selectInitializedComponent(container) {
+      // 非表示中に再描画を繰り返した系列も、復元待ちの位置を残す。
+      return container.dataset.scrollPositionInitialized === "true" || container.dataset.previousScrollPosition !== undefined;
+    })
+    .map(function rememberComponentPosition(container) {
+      // 未表示の系列ではレイアウト確定後に適用する保存位置を優先する。
+      return [container.dataset.componentIdentifiers, Number(container.dataset.previousScrollPosition ?? container.scrollLeft)];
+    }));
   const cancelledTaskIdentifiers = new Set(applicationState.tasks
     .filter(function selectCancelledTask(task) { return task.status === "中止"; })
     .map(function selectCancelledTaskIdentifier(task) { return task.identifier; }));
@@ -1716,6 +1726,10 @@ function renderTaskDependencyGraph(filteredTasks) {
   dependencyPanel.innerHTML = createDependencyPanelContent("タスクツリー", presentation);
   dependencyPanel.open = dependencyPanel.dataset.rendered ? wasOpen : true;
   dependencyPanel.dataset.rendered = "true";
+  for (const container of dependencyPanel.querySelectorAll(".dependency-component-scroll")) {
+    const previousScrollPosition = previousScrollPositions.get(container.dataset.componentIdentifiers);
+    if (previousScrollPosition !== undefined) container.dataset.previousScrollPosition = String(previousScrollPosition);
+  }
   initializeTaskDependencyEditing(dependencyPanel);
   initializeDependencyGraphScrolling(dependencyPanel, applicationState.dependencyGraphScrollShouldReset);
   scheduleDependencyGraphDrawing();
@@ -2228,7 +2242,7 @@ function createDependencyGraphPresentation(primaryTasks, availableTasks, exclude
       : "";
     componentMarkup += `<section class="dependency-component${graph.components.length === 1 ? " single" : ""}">
       ${componentHeader}
-      <div class="dependency-component-scroll" data-initial-level-index="${initialLevelIndex}">
+      <div class="dependency-component-scroll" data-component-identifiers="${escapeAttribute(JSON.stringify(component.nodes.map(node => node.identifier).sort()))}" data-initial-level-index="${initialLevelIndex}">
         <div class="dependency-graph-canvas" data-dependency-graph="${escapeAttribute(componentGraphIdentifier)}">
           <svg class="dependency-edges" aria-hidden="true">
             <defs>
@@ -2285,16 +2299,24 @@ function initializeDependencyGraphScrolling(rootElement, resetsScrollPosition) {
   window.requestAnimationFrame(function positionDependencyComponents() {
     // 非表示中は幅を確定できないため、開いた時または画面移動後まで初期化を保留する。
     const visibleScrollContainers = scrollContainers.filter(function selectVisibleScrollContainer(scrollContainer) {
-      return scrollContainer.offsetParent !== null;
+      return rootElement.contains(scrollContainer) && scrollContainer.offsetParent !== null;
     });
     if (visibleScrollContainers.length === 0) return;
     for (const scrollContainer of visibleScrollContainers) {
-      if (!resetsScrollPosition) continue;
+      // タスク系列は再描画時の位置を復元し、新しい系列だけ最初の未完了段へ移動する。
+      const initializesTaskComponent = rootElement.id === "task-dependency-panel"
+        && scrollContainer.dataset.scrollPositionInitialized !== "true";
+      if (!resetsScrollPosition && !initializesTaskComponent) continue;
       const initialLevelIndex = Number(scrollContainer.dataset.initialLevelIndex || 0);
       const targetLevel = scrollContainer.querySelector(`[data-dependency-level-index="${initialLevelIndex}"]`);
       if (!targetLevel) continue;
       scrollContainer.dataset.initializingScroll = "true";
-      scrollContainer.scrollLeft = Math.max(0, targetLevel.offsetLeft - 12);
+      // 保存位置がなければ未完了段の左余白を確保し、負の位置を避ける。
+      scrollContainer.scrollLeft = !resetsScrollPosition && scrollContainer.dataset.previousScrollPosition !== undefined
+        ? Number(scrollContainer.dataset.previousScrollPosition)
+        : Math.max(0, targetLevel.offsetLeft - 12);
+      scrollContainer.dataset.scrollPositionInitialized = "true";
+      delete scrollContainer.dataset.previousScrollPosition;
       window.requestAnimationFrame(function finishDependencyScrollInitialization() {
         // 初期移動では操作中スクロールバーを表示しない。
         delete scrollContainer.dataset.initializingScroll;
