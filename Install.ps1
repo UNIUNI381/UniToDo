@@ -152,22 +152,32 @@ function Install-CodexTaskIntegration {
         Write-Warning "操作ラッパーがないためCodex許可ルールを登録しませんでした: $wrapperPath"
         return
     }
-    $commandPattern = ConvertTo-Json -InputObject @(
+    $legacyCommandPattern = ConvertTo-Json -InputObject @(
         "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $wrapperPath
     ) -Compress
+    $commandPattern = ConvertTo-Json -InputObject @(
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", @($wrapperPath, $wrapperPath.Replace('\', '/'))
+    ) -Compress -Depth 3
     $ruleText = "# UniToDo taskctl wrapper" + [Environment]::NewLine +
         'prefix_rule(pattern=' + $commandPattern + ', decision="allow")' + [Environment]::NewLine
+    $legacyRuleText = "# UniToDo taskctl wrapper" + [Environment]::NewLine +
+        'prefix_rule(pattern=' + $legacyCommandPattern + ', decision="allow")' + [Environment]::NewLine
     $ruleDirectory = Join-Path $CodexDirectory "rules"
     $rulePath = Join-Path $ruleDirectory "unitodo-taskctl.rules"
 
-    # 既存の共通ルールや独自編集を保持し、同じルールの再導入では書き込まない。
+    # 旧版が生成した同一ラッパーのルールだけを更新し、共通ルールや独自編集を保持する。
+    $ruleNeedsUpdate = $true
     if (Test-Path -LiteralPath $rulePath) {
-        if ([System.IO.File]::ReadAllText($rulePath) -ne $ruleText) {
+        $existingRuleText = [System.IO.File]::ReadAllText($rulePath)
+        if ($existingRuleText -ceq $ruleText) {
+            $ruleNeedsUpdate = $false
+        }
+        elseif ($existingRuleText -cne $legacyRuleText) {
             Write-Warning "既存のCodex許可ルールは変更しませんでした。登録先と内容を確認してください: $rulePath"
             return
         }
     }
-    elseif ($PSCmdlet.ShouldProcess($rulePath, "UniToDo操作ラッパーを全プロジェクトで許可するルールを登録")) {
+    if ($ruleNeedsUpdate -and $PSCmdlet.ShouldProcess($rulePath, "UniToDo操作ラッパーを全プロジェクトで許可するルールを登録・更新")) {
         New-Item -ItemType Directory -Path $ruleDirectory -Force | Out-Null
         [System.IO.File]::WriteAllText($rulePath, $ruleText, (New-Object System.Text.UTF8Encoding($false)))
     }

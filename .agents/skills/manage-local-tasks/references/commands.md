@@ -44,9 +44,11 @@ taskctl get TASK-ID --fields identifier,projectIdentifier,status,details
 
 UniToDo専用会話では権限不足を報告して停止する。通常のCodexではローカル接続の権限拒否を避けるため、最初から実行ツールの`sandbox_permissions: "require_escalated"`でラッパーを呼ぶ。これはWindowsの管理者昇格ではなく、通常ユーザーでサンドボックス外から実行する指定。
 
-承認prefixは`powershell -NoProfile -ExecutionPolicy Bypass -File <スキル絶対パス>\scripts\invoke-taskctl.ps1`までに限定し、コマンド名やタスクIDは含めない。ユーザーが継続利用を許可したルールは`~/.codex/rules/`へ保存すると全プロジェクトで利用できる。ルールを手動追加した後はCodexを再起動する。ラッパーの絶対パスと引数の並びを固定し、複雑なPowerShell処理や別の操作とまとめず単独で呼ぶ。
+承認prefixは`powershell -NoProfile -ExecutionPolicy Bypass -File <スキル絶対パス>\scripts\invoke-taskctl.ps1`までに限定し、コマンド名やタスクIDは含めない。ユーザーが継続利用を許可したルールは`~/.codex/rules/`へ保存すると全プロジェクトで利用できる。ルールを手動追加した後はCodexを再起動する。ルールは文字列で照合されるため、インストーラーは同じラッパーのパスを`\`と`/`の両表記で登録する。引数の並びを固定し、複雑なPowerShell処理や別の操作とまとめず単独で呼ぶ。
 
 終了コード126は実行・ローカル接続の権限拒否。許可ルールと実行指定を確認し、許可されていない別経路で迂回しない。`--help`の成功やサンドボックス内のプロセス検索だけでは本体の稼働・接続可否を判定しない。
+
+外側のPowerShellがネイティブ終了コード126を実行ツール上の1へ変える場合がある。実行ツールの1だけで権限拒否を判定せず、標準エラーの診断も確認する。正確な終了コードが必要な呼出しでは外側で`exit $LASTEXITCODE`を明示するが、複合コマンドの許可判定は単独のラッパー呼出しと異なる可能性がある。
 
 ## PowerShell 5.1
 

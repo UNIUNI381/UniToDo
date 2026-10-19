@@ -59,9 +59,21 @@ try {
     $commandPattern = ConvertFrom-Json $patternMatch.Groups[1].Value
     Assert-InstallerCondition ($commandPattern.Count -eq 6 -and
         ($commandPattern[0..4] -join " ") -ceq "powershell -NoProfile -ExecutionPolicy Bypass -File" -and
-        $commandPattern[5] -ceq $wrapperPath) "導入先の操作ラッパーだけに許可範囲が限定されていません。"
+        $commandPattern[5].Count -eq 2 -and
+        $commandPattern[5][0] -ceq $wrapperPath -and
+        $commandPattern[5][1] -ceq $wrapperPath.Replace('\', '/')) "許可範囲が同じラッパーの両パス表記に限定されていません。"
     $ruleBytes = [IO.File]::ReadAllBytes($rulePath)
     Assert-InstallerCondition (-not ($ruleBytes[0] -eq 0xEF -and $ruleBytes[1] -eq 0xBB -and $ruleBytes[2] -eq 0xBF)) "ルールへBOMが混入しました。"
+
+    # 旧インストーラーが生成した単一表記のルールはWhatIfで保持し、通常実行で移行する。
+    $legacyPattern = ConvertTo-Json -InputObject @("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $wrapperPath) -Compress
+    $legacyRuleText = "# UniToDo taskctl wrapper" + [Environment]::NewLine +
+        'prefix_rule(pattern=' + $legacyPattern + ', decision="allow")' + [Environment]::NewLine
+    [IO.File]::WriteAllText($rulePath, $legacyRuleText)
+    Install-CodexTaskIntegration @integrationArguments -WhatIf -WarningAction SilentlyContinue | Out-Null
+    Assert-InstallerCondition ([IO.File]::ReadAllText($rulePath) -ceq $legacyRuleText) "WhatIfで旧ルールを書き換えました。"
+    Install-CodexTaskIntegration @integrationArguments -WarningAction SilentlyContinue | Out-Null
+    Assert-InstallerCondition ([IO.File]::ReadAllText($rulePath) -ceq $ruleText) "旧ルールを両パス表記の許可へ移行できません。"
 
     # 再導入は同じルールを書き直さず、既存Skillの独自内容も保持する。
     $customSkillPath = Join-Path $skillDirectory "custom.txt"

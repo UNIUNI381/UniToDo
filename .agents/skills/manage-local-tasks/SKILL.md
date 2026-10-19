@@ -9,7 +9,7 @@ description: WindowsローカルのUniToDoでタスク・プロジェクト・AI
 
 - タスク・プロジェクト・作業時間は `taskctl` で操作し、SQLiteやAPIを直接編集しない。
 - UniToDo専用会話で直接実行を指定されている場合は専用PATHの `taskctl` を使う。それ以外のCodexでは、このSkillの `scripts/invoke-taskctl.ps1` を使う。
-- 通常のCodexでは、ラッパーを最初から実行ツールの `sandbox_permissions: "require_escalated"` 付きで呼ぶ。ループバック接続を拒否するサンドボックス内では先に試さない。ユーザー共通の許可ルールがあれば追加確認なしで実行できる。未登録時の承認範囲はラッパーの絶対パスまでとし、詳細は[権限エラー](references/commands.md#権限エラー)に従う。
+- 通常のCodexでは、初回を含むすべての呼出しで実行ツールの `sandbox_permissions: "require_escalated"` を明示する。下のコマンド例だけを実行してこの指定を省略しない。ユーザー共通の許可ルールはサンドボックス外実行の承認を省くもので、サンドボックス内の通信を許可するものではない。未登録時の承認範囲はラッパーの絶対パスまでとし、詳細は[権限エラー](references/commands.md#権限エラー)に従う。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "<スキル絶対パス>\scripts\invoke-taskctl.ps1" now --json
