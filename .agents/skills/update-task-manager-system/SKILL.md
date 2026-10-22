@@ -9,7 +9,9 @@ description: UniToDo（開発名TaskManager）の実装・テスト・配布・�
 
 1. [AGENTS.md](../../../AGENTS.md)に従い、`git status --short`で既存変更を確認する。追跡・除外の詳細が必要な場合だけ `--ignored` を付ける。
 2. [Vaultの入口](../../../docs/TaskManager-Vault/00_入口.md)から変更に関係するノートを読む。環境・検証は[開発運用](../../../docs/TaskManager-Vault/06_開発運用.md)を参照する。
-3. 依頼を満たす最小限の変更を実装し、影響するVaultを更新する。将来用の仕組みや無関係な整理を追加しない。
+3. 依頼を満たす最小限の変更を実装し、影響するVaultを更新する。Vault編集には共通スキル `$edit-obsidian-vault` を読み、記録範囲と正本の優先順位は本プロジェクトのAGENTS.md・Vault入口に従う。将来用の仕組みや無関係な整理を追加しない。
+
+共通スキルの保存先は `$CODEX_HOME/skills/edit-obsidian-vault/SKILL.md`（未設定時は `~/.codex/skills/edit-obsidian-vault/SKILL.md`）。利用できない環境ではプロジェクト内の規則で編集し、共通手順を確認できなかった旨を報告する。共通手順のコピーをプロジェクト内へ作らない。
 
 ## 検証と現環境への反映
 
