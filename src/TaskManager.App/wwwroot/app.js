@@ -995,12 +995,17 @@ function createTimeEntrySegment(timeEntry, dayStart, dayEnd) {
 
 /** 作業ログブロックのツールチップ文を作成する。 */
 function buildTimeEntryTooltip(timeEntry) {
-  // 名称、プロジェクト、開始・終了、確認状態を改行区切りで返す。
+  // 開始から終了までの秒数を求め、実行中は現在時刻までを継続時間にする。
+  const durationSeconds = Math.max(
+    0,
+    Math.floor(((timeEntry.endAt ? Date.parse(timeEntry.endAt) : Date.now()) - Date.parse(timeEntry.startAt)) / 1000));
+  // 名称、プロジェクト、開始・終了、継続時間、確認状態を改行区切りで返す。
   const endText = timeEntry.endAt ? formatDateTime(timeEntry.endAt) : "実行中";
   return [
     timeEntry.title,
     timeEntry.projectNameSnapshot || "プロジェクト未設定",
     `${formatDateTime(timeEntry.startAt)} ～ ${endText}`,
+    `継続時間：${formatDuration(durationSeconds)}`,
     timeEntry.needsReview ? "要確認" : ""
   ].filter(Boolean).join("\n");
 }
