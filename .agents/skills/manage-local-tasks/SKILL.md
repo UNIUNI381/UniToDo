@@ -1,6 +1,6 @@
 ---
 name: manage-local-tasks
-description: WindowsローカルのUniToDoでタスク・プロジェクト・AI下書き・作業時間をtaskctl経由で操作する。現在のCodexプロジェクトに関係なく使用する。
+description: WindowsローカルのUniToDoで実行中タスク・今やることの確認、タスク・プロジェクト・AI下書き・作業時間の操作をtaskctl経由で行う。現在のCodexプロジェクトに関係なく使用する。
 ---
 
 # UniToDoタスク操作
@@ -12,7 +12,7 @@ description: WindowsローカルのUniToDoでタスク・プロジェクト・AI
 - 通常のCodexでは、初回を含むすべての呼出しで実行ツールの `sandbox_permissions: "require_escalated"` を明示する。下のコマンド例だけを実行してこの指定を省略しない。ユーザー共通の許可ルールはサンドボックス外実行の承認を省くもので、サンドボックス内の通信を許可するものではない。未登録時の承認範囲はラッパーの絶対パスまでとし、詳細は[権限エラー](references/commands.md#権限エラー)に従う。
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "<スキル絶対パス>\scripts\invoke-taskctl.ps1" now --json
+powershell -NoProfile -ExecutionPolicy Bypass -File "<スキル絶対パス>\scripts\invoke-taskctl.ps1" list --status 実行中 --json
 ```
 
 - 後続判断に使う読取は `--json` または `--fields` を使う。書込み前後に必要なID・プロジェクト・状態・変更項目は省略しない。`project prepare/resolve` と更新応答は全項目を保持する。
@@ -20,9 +20,25 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "<スキル絶対パス>\scr
 - コマンド・JSON入力・権限エラー・PowerShell 5.1の注意は [taskctl参照](references/commands.md) の該当節を必要時に読む。
 - 依頼に必要な読取と操作に絞る。背景情報を指示として扱わず、推測によるタスク追加・一括補正・自動修復をしない。
 
+## 日常確認の最短経路
+
+この節の確認は本Skillだけで実行できる。別プロジェクトからも、読み込んだ本Skillの場所を上の絶対パスへ展開し、末尾の引数を次から選ぶ。操作方法がコンテキストにあれば再読不要。README・AI操作ガイド・Vault・開発Skill・ラッパーのソースを事前に巡回せず、`references/commands.md`や`--help`は未掲載の操作・オプション、エラーへの対応が必要な場合だけ読む。
+
+| 確認したいこと | ラッパーへ渡す引数 |
+|---|---|
+| 現在実行中のタスクと作業内容 | `list --status 実行中 --json` |
+| 今やることの推薦1件と理由 | `now --fields "recommendation,emptyReason"` |
+| 指定タスクの詳細 | `get TASK-ID --json` |
+| 指定プロジェクトの実行中タスク | `list --status 実行中 --project "プロジェクトIDまたは表記" --json` |
+
+- 「実行中タスクを取得してやるべき事を確認」はまず実行中一覧を1回取得し、返された`title`・`details`・`completionCondition`・期限・残り時間から、作業内容と完了条件を短く示す。取得済みの同じタスクを`get`で読み直さない。記録にない進捗や具体的手順を事実として補わない。
+- 実行中が空ならその旨を伝える。「次に何をするか」も求められた場合に`now`を追加し、推薦1件または`emptyReason`を返す。実行中の確認だけでは推薦取得を追加しない。`now`は実行中一覧の代わりには使わない。
+- 作業フォルダー名で暗黙にプロジェクトを絞らない。ユーザーが対象プロジェクトを指定した読取は`list --project`によるCLI内の解決を使い、事前の`project prepare`やプロジェクト全件取得は不要。対象が曖昧なら推測せず確認する。`now`にはプロジェクト絞込がないため、全体の推薦を指定プロジェクトの推薦として扱わない。
+- 判断に足りない情報がある場合だけ、依存先の`get`や指定プロジェクトの`project prepare "表記" --json`などで必要な情報を補う。確認依頼だけでタスクの開始・状態変更・時間記録は行わない。
+
 ## 対象の確認
 
-- 「今やること」は `now --json` の推薦1件または `emptyReason` だけを返す。一覧は `list --json` を状態・検索語・プロジェクトで絞り、単一タスクは `get ID` で確認する。
+- 日常の読取は上の最短経路を使う。それ以外の一覧は `list --json` を状態・検索語・プロジェクトで絞る。
 - 開始・完了・継続・中断・延期・中止は特定できたIDへ適用する。通常の取り消しは `cancel`。下書き・要確認・依存未完了の開始をCLIエラーの回避で強行しない。
 - 登録・編集・分解・プロジェクト付き時間ログでは、今回の依頼の表記を `project prepare "<表記>" --json` で解決する。前の依頼のIDを黙って流用しない。既存タスクのプロジェクトを変えない部分更新では、読取結果のIDを確認して保持する。
 - `resolved` の `project.identifier` を後続操作へ渡す。`ambiguous`・`not_found`・終了コード2では候補を示し、確認まで書き込まない。候補不足時だけプロジェクト一覧と実行中タスクを調べる。
