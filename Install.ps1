@@ -155,13 +155,21 @@ function Install-CodexTaskIntegration {
     $legacyCommandPattern = ConvertTo-Json -InputObject @(
         "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", $wrapperPath
     ) -Compress
-    $commandPattern = ConvertTo-Json -InputObject @(
+    $previousCommandPattern = ConvertTo-Json -InputObject @(
         "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", @($wrapperPath, $wrapperPath.Replace('\', '/'))
+    ) -Compress -Depth 3
+    # 実行名と絶対パスの表記差だけを許容し、対象スクリプトと起動オプションは固定する。
+    $windowsPowerShellPath = (Get-Command powershell.exe -CommandType Application -ErrorAction Stop).Source
+    $commandPattern = ConvertTo-Json -InputObject @(
+        @("powershell", "powershell.exe", $windowsPowerShellPath, $windowsPowerShellPath.Replace('\', '/')),
+        "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", @($wrapperPath, $wrapperPath.Replace('\', '/'))
     ) -Compress -Depth 3
     $ruleText = "# UniToDo taskctl wrapper" + [Environment]::NewLine +
         'prefix_rule(pattern=' + $commandPattern + ', decision="allow")' + [Environment]::NewLine
     $legacyRuleText = "# UniToDo taskctl wrapper" + [Environment]::NewLine +
         'prefix_rule(pattern=' + $legacyCommandPattern + ', decision="allow")' + [Environment]::NewLine
+    $previousRuleText = "# UniToDo taskctl wrapper" + [Environment]::NewLine +
+        'prefix_rule(pattern=' + $previousCommandPattern + ', decision="allow")' + [Environment]::NewLine
     $ruleDirectory = Join-Path $CodexDirectory "rules"
     $rulePath = Join-Path $ruleDirectory "unitodo-taskctl.rules"
 
@@ -172,7 +180,7 @@ function Install-CodexTaskIntegration {
         if ($existingRuleText -ceq $ruleText) {
             $ruleNeedsUpdate = $false
         }
-        elseif ($existingRuleText -cne $legacyRuleText) {
+        elseif ($existingRuleText -cnotin @($legacyRuleText, $previousRuleText)) {
             Write-Warning "既存のCodex許可ルールは変更しませんでした。登録先と内容を確認してください: $rulePath"
             return
         }

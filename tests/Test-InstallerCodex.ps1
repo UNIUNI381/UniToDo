@@ -57,8 +57,14 @@ try {
     $patternMatch = [regex]::Match($ruleText, 'prefix_rule\(pattern=(\[.*\]), decision="allow"\)')
     Assert-InstallerCondition $patternMatch.Success "許可ルールを読み取れません。"
     $commandPattern = ConvertFrom-Json $patternMatch.Groups[1].Value
+    $windowsPowerShellPath = (Get-Command powershell.exe -CommandType Application -ErrorAction Stop).Source
     Assert-InstallerCondition ($commandPattern.Count -eq 6 -and
-        ($commandPattern[0..4] -join " ") -ceq "powershell -NoProfile -ExecutionPolicy Bypass -File" -and
+        $commandPattern[0].Count -eq 4 -and
+        $commandPattern[0][0] -ceq "powershell" -and
+        $commandPattern[0][1] -ceq "powershell.exe" -and
+        $commandPattern[0][2] -ceq $windowsPowerShellPath -and
+        $commandPattern[0][3] -ceq $windowsPowerShellPath.Replace('\', '/') -and
+        ($commandPattern[1..4] -join " ") -ceq "-NoProfile -ExecutionPolicy Bypass -File" -and
         $commandPattern[5].Count -eq 2 -and
         $commandPattern[5][0] -ceq $wrapperPath -and
         $commandPattern[5][1] -ceq $wrapperPath.Replace('\', '/')) "許可範囲が同じラッパーの両パス表記に限定されていません。"
@@ -74,6 +80,16 @@ try {
     Assert-InstallerCondition ([IO.File]::ReadAllText($rulePath) -ceq $legacyRuleText) "WhatIfで旧ルールを書き換えました。"
     Install-CodexTaskIntegration @integrationArguments -WarningAction SilentlyContinue | Out-Null
     Assert-InstallerCondition ([IO.File]::ReadAllText($rulePath) -ceq $ruleText) "旧ルールを両パス表記の許可へ移行できません。"
+
+    # 実行名がpowershellだけの旧ルールも、同じラッパーに限定したまま更新する。
+    $previousPattern = ConvertTo-Json -InputObject @(
+        "powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", @($wrapperPath, $wrapperPath.Replace('\', '/'))
+    ) -Compress -Depth 3
+    $previousRuleText = "# UniToDo taskctl wrapper" + [Environment]::NewLine +
+        'prefix_rule(pattern=' + $previousPattern + ', decision="allow")' + [Environment]::NewLine
+    [IO.File]::WriteAllText($rulePath, $previousRuleText)
+    Install-CodexTaskIntegration @integrationArguments -WarningAction SilentlyContinue | Out-Null
+    Assert-InstallerCondition ([IO.File]::ReadAllText($rulePath) -ceq $ruleText) "実行名が単一の旧ルールを移行できません。"
 
     # 再導入は同じルールを書き直さず、既存Skillの独自内容も保持する。
     $customSkillPath = Join-Path $skillDirectory "custom.txt"

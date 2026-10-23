@@ -44,7 +44,9 @@ taskctl get TASK-ID --fields "identifier,projectIdentifier,status,details"
 
 UniToDo専用会話では権限不足を報告して停止する。通常のCodexではローカル接続の権限拒否を避けるため、最初から実行ツールの`sandbox_permissions: "require_escalated"`でラッパーを呼ぶ。これはWindowsの管理者昇格ではなく、通常ユーザーでサンドボックス外から実行する指定。
 
-承認prefixは`powershell -NoProfile -ExecutionPolicy Bypass -File <スキル絶対パス>\scripts\invoke-taskctl.ps1`までに限定し、コマンド名やタスクIDは含めない。ユーザーが継続利用を許可したルールは`~/.codex/rules/`へ保存すると全プロジェクトで利用できる。ルールを手動追加した後はCodexを再起動する。ルールは文字列で照合されるため、インストーラーは同じラッパーのパスを`\`と`/`の両表記で登録する。引数の並びを固定し、複雑なPowerShell処理や別の操作とまとめず単独で呼ぶ。
+承認prefixは`["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "<ラッパー絶対パス>"]`までに限定し、コマンド名やタスクIDは含めない。継続許可を求める場合は、この配列を実行ツールの`prefix_rule`へ渡す。ユーザーが継続利用を許可したルールは`$CODEX_HOME/rules/`（未設定時は`~/.codex/rules/`）へ保存すると全プロジェクトで利用できる。ルールを手動追加した後はCodexを再起動する。
+
+ルールは文字列で照合される。インストーラーは`powershell`・`powershell.exe`・Windows PowerShellの絶対パス、および同じラッパーのパス区切り`\`・`/`を登録する。Skillの標準形は上の`powershell -NoProfile -ExecutionPolicy Bypass -File`とし、引数の並びを固定して単独で呼ぶ。`pwsh -Command`や`& <ラッパー>`などの別形式は同じ許可に一致するとは限らない。承認が繰り返される場合は、実行指定を外すのではなく、ルールの読込みと実際の呼出形式・絶対パスの一致を確認する。
 
 終了コード126は実行・ローカル接続の権限拒否。許可ルールと実行指定を確認し、許可されていない別経路で迂回しない。`--help`の成功やサンドボックス内のプロセス検索だけでは本体の稼働・接続可否を判定しない。
 
