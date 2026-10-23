@@ -108,6 +108,7 @@ public static class Program
         await RunTestAsync("録音中の2回目のF13でAPI停止を確認する", TestVoiceInputSecondPressStopsAsync);
         await RunTestAsync("TypeWhisper停止確認前に校正待ちを表示しない", TestVoiceInputStopAcknowledgementAsync);
         await RunTestAsync("TypeWhisper停止失敗時に録音状態を維持する", TestVoiceInputStopFailureAsync);
+        await RunTestAsync("Esc停止とF13停止の競合時に待機表示を終了する", TestVoiceInputStopRaceCompletionAsync);
         await RunTestAsync("無音終了時に校正待ち表示を終了する", TestVoiceInputNoSpeechCompletionAsync);
         await RunTestAsync("古い無音結果で新規録音表示を上書きしない", TestVoiceInputStaleNoSpeechResultAsync);
         await RunTestAsync("TypeWhisper APIで音声校正を開始停止する", TestTypeWhisperApiControlAsync);
@@ -1323,6 +1324,15 @@ public static class Program
         Assert(statusLabel.Height >= measuredTextSize.Height, "長い状態文の全行を表示できる高さがありません。");
         Assert(workingArea.Contains(statusForm.Bounds), "音声状態表示が作業領域からはみ出しました。");
         Assert(workingArea.Bottom - statusForm.Bottom >= 84, "音声状態表示がTypeWhisper表示を避ける高さへ移動していません。");
+
+        // 待機中に表示だけを閉じられ、閉じるボタンが本文や進捗バーと重ならないことを確認する。
+        statusForm.Show();
+        Button closeButton = statusForm.Controls.OfType<Button>().Single();
+        ProgressBar progressBar = statusForm.Controls.OfType<ProgressBar>().Single();
+        Assert(closeButton.Visible && statusForm.ClientRectangle.Contains(closeButton.Bounds), "待機表示を閉じるボタンが画面内に表示されていません。");
+        Assert(closeButton.Top > progressBar.Bottom, "閉じるボタンが待機中の進捗バーと重なっています。");
+        closeButton.PerformClick();
+        Assert(statusForm.IsDisposed, "待機中の状態画面を閉じられませんでした。");
         return Task.CompletedTask;
     }
 
@@ -1768,6 +1778,38 @@ public static class Program
         Assert(
             statuses.All(status => status.Message != "音声認識を停止しました。文字起こしと校正を待っています…"),
             "停止失敗を停止済みとして校正待ち表示へ進みました。");
+    }
+
+    /// <summary>Esc停止との競合でセッションIDがない場合も待機表示が終了することを検証する。</summary>
+    private static async Task TestVoiceInputStopRaceCompletionAsync()
+    {
+        // 停止前の状態確認と停止APIの失敗後のそれぞれで、Escによる停止を再現する。
+        foreach (bool stopFails in new[] { false, true })
+        {
+            RecordingVoiceInputRuntime voiceInputRuntime = new()
+            {
+                OllamaReady = true,
+                OllamaRunning = true,
+                TypeWhisperRunning = true,
+                RecognitionStopError = stopFails ? new HttpRequestException("Escと停止APIが競合") : null
+            };
+            VoiceInputCoordinator coordinator = CreateVoiceInputCoordinator(voiceInputRuntime);
+            List<VoiceInputStatus> statuses = [];
+            coordinator.StatusChanged += statuses.Add;
+            await coordinator.StartAsync(CancellationToken.None);
+
+            voiceInputRuntime.RecordingStateResponses.Enqueue(true);
+            if (stopFails)
+            {
+                voiceInputRuntime.RecordingStateResponses.Enqueue(true);
+            }
+            voiceInputRuntime.RecordingStateResponses.Enqueue(false);
+            await coordinator.StartAsync(CancellationToken.None);
+
+            Assert(statuses.LastOrDefault()?.Kind == VoiceInputStatusKind.Success, "Esc停止との競合後も待機表示が残っています。");
+            Assert(voiceInputRuntime.RecognitionResultReadCount == 0, "セッションIDなしで文字起こし結果を取得しました。");
+            Assert(voiceInputRuntime.RecognitionStopCount == (stopFails ? 1 : 0), "停止済み状態と停止APIの呼出しが一致しません。");
+        }
     }
 
     /// <summary>TypeWhisperが無音判定した場合に確認画面待ちを正常終了することを検証する。</summary>
@@ -3406,6 +3448,8 @@ public static class Program
         public int RecognitionStopCount { get; private set; }
         public int RecognitionResultReadCount { get; private set; }
         public List<string> Operations { get; } = [];
+        // EscとAPI停止の競合を再現するため、順番に返す録音状態を保持する。
+        public Queue<bool> RecordingStateResponses { get; } = new();
         // モデルロード、録音開始、録音停止をテスト側の任意時点まで保留する合図を保持する。
         public TaskCompletionSource? ModelLoadCompletion { get; init; }
         public TaskCompletionSource? RecognitionStartCompletion { get; init; }
@@ -3505,6 +3549,10 @@ public static class Program
         public Task<bool> IsTypeWhisperRecordingAsync(CancellationToken cancellationToken)
         {
             // 外部APIへ接続せずテストケースの録音状態を返す。
+            if (RecordingStateResponses.TryDequeue(out bool recordingResponse))
+            {
+                TypeWhisperRecording = recordingResponse;
+            }
             return Task.FromResult(TypeWhisperRecording);
         }
 

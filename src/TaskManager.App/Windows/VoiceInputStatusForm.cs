@@ -118,7 +118,8 @@ public sealed class VoiceInputStatusForm : Form
             ? Color.FromArgb(255, 180, 180)
             : Color.White;
         detailTextBox.Visible = false;
-        closeButton.Visible = false;
+        closeButton.Text = "表示を閉じる";
+        closeButton.Visible = true;
         UpdateCompactLayout(status.Message);
         progressBar.Visible = true;
         progressBar.Style = status.Kind == VoiceInputStatusKind.Progress
@@ -158,13 +159,15 @@ public sealed class VoiceInputStatusForm : Form
             TextFormatFlags.NoPadding | TextFormatFlags.WordBreak);
         int statusHeight = Math.Max(CompactMinimumStatusHeight, wrappedTextSize.Height);
 
-        // 状態文の下へ進捗バーと余白を積み、内容量に応じたフォーム高を設定する。
+        // 状態文の下へ進捗バーと閉じるボタンを積み、待機中でも表示を閉じられる高さにする。
         int progressTop = 14 + statusHeight + 12;
-        ClientSize = new Size(clientWidth, progressTop + 26);
+        int buttonTop = progressTop + 15;
+        ClientSize = new Size(clientWidth, buttonTop + closeButton.Height + 12);
         statusLabel.Location = new Point(18, 14);
         statusLabel.Size = new Size(contentWidth, statusHeight);
         progressBar.Location = new Point(18, progressTop);
         progressBar.Size = new Size(contentWidth, 5);
+        closeButton.Location = new Point(clientWidth - closeButton.Width - 18, buttonTop);
     }
 
     /// <summary>Codex CLIの応答を内容量に合わせた詳細画面へ表示する。</summary>
@@ -210,6 +213,7 @@ public sealed class VoiceInputStatusForm : Form
         detailTextBox.Visible = true;
         progressBar.Visible = false;
         closeButton.Location = new Point(clientWidth - closeButton.Width - 18, buttonTop);
+        closeButton.Text = "閉じる";
         closeButton.Visible = true;
         closeTimer.Interval = 30000;
         closeTimer.Start();
@@ -234,10 +238,10 @@ public sealed class VoiceInputStatusForm : Form
         Close();
     }
 
-    /// <summary>閉じるボタンで応答画面を直ちに閉じる。</summary>
+    /// <summary>閉じるボタンで状態や応答の表示だけを直ちに閉じる。</summary>
     private void HandleCloseButtonClick(object? sender, EventArgs eventArguments)
     {
-        // 自動終了タイマーを止め、利用者の明示操作を優先する。
+        // 録音・文字起こし・送信は取り消さず、自動終了タイマーと画面だけを終了する。
         closeTimer.Stop();
         Close();
     }

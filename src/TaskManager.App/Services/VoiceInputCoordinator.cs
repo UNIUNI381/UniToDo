@@ -312,6 +312,7 @@ public sealed class VoiceInputCoordinator(
         // API停止前に本体側ですでに停止していた場合は、追跡可能なセッションIDがないため監視しない。
         if (sessionIdentifier is null)
         {
+            PublishStatus("録音は停止済みです。音声入力の待機表示を終了しました", VoiceInputStatusKind.Success);
             return;
         }
         _ = ObserveRecognitionResultAsync(
