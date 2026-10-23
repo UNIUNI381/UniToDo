@@ -243,6 +243,12 @@ tbody tr:last-child td { border-bottom: 0; }
 .dependency-components { position: relative; z-index: 2; display: grid; width: 100%; min-width: 0; gap: 20px; padding: 8px 0 0; }
 .dependency-component { width: 100%; min-width: 0; overflow: hidden; padding: 13px 13px 5px; border: 1px dashed #c4d4ca; border-radius: 14px; }
 .dependency-component.single { padding: 0; border: 0; }
+/* タスク欄の系列は囲まず、隣接するグループの境界だけを点線で区切る。 */
+#task-dependency-panel .dependency-components { gap: 8px; padding-top: 0; }
+#task-dependency-panel .dependency-component { position: relative; border: 0; border-radius: 0; }
+#task-dependency-panel .dependency-component + .dependency-component::before { content: ""; position: absolute; top: 0; left: 13px; right: 13px; border-top: 1px dashed #c4d4ca; }
+/* 系列見出しの下はキャンバスの余白だけとし、カードまでの間隔を半分にする。 */
+#task-dependency-panel .dependency-component-header { margin-bottom: 0; }
 .dependency-component-header { position: relative; z-index: 3; display: flex; width: max-content; max-width: min(760px, calc(100vw - 120px)); align-items: center; gap: 9px; margin: 0 0 12px; padding: 7px 10px; border-radius: 9px; background: #e7f1eb; color: var(--green-dark); }
 .dependency-component-header strong { overflow: hidden; max-width: 560px; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .dependency-component-header small { color: var(--muted); font-size: 10px; white-space: nowrap; }
@@ -269,7 +275,10 @@ tbody tr:last-child td { border-bottom: 0; }
 
 .dependency-node-meta { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: auto; }
 .dependency-node-meta span { padding: 3px 7px; border-radius: 999px; background: #eef2ef; color: #58645d; font-size: 10px; font-weight: 700; }
-.dependency-node.running { background: #f3fbf6; }
+/* 実行中は状態ラベルと影だけを強調し、カードの背景と枠を保つ。 */
+.dependency-node.running { box-shadow: 0 7px 17px rgba(26,45,35,.20); }
+.dependency-node.running .dependency-node-meta > span:first-child { display: inline-flex; align-items: center; gap: 5px; background: var(--green); color: white; }
+.dependency-node.running .dependency-node-meta > span:first-child::before { content: ""; width: 6px; height: 6px; flex: 0 0 auto; border-radius: 50%; background: currentColor; }
 .dependency-node.completed { opacity: .72; }
 .dependency-node.outside-scope { border-style: dashed; }
 .dependency-node.missing, .dependency-node.cycle { border-color: #e0aaa6; border-left-color: var(--danger); background: #fff7f6; }
