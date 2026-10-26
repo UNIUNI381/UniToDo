@@ -76,6 +76,8 @@ public static class Program
         await RunTestAsync("厳守期限不足を割り込ませる", TestStrictDeadlineInterruptionAsync);
         await RunTestAsync("締切集中時は先の期限群を優先する", TestCumulativeDeadlinePressureAsync);
         await RunTestAsync("後日期限を過去の累積作業量で過大評価しない", TestLaterDeadlineNormalizationAsync);
+        await RunTestAsync("余裕がある翌日期限を後日の後続解放より優先する", TestNearDeadlineBeforeUnblockingAsync);
+        await RunTestAsync("余裕がある段階から期限接近を連続して評価する", TestDeadlineRiskWithPositiveSlackAsync);
         await RunTestAsync("締切群に余裕があれば重要度を優先できる", TestSafeLaterDeadlineSelectionAsync);
         await RunTestAsync("同じ締切群では重要度を比較する", TestImportanceWithinDeadlineGroupAsync);
         await RunTestAsync("先行タスクへ後続の実効期限を継承する", TestEffectiveDeadlineInheritanceAsync);
@@ -578,6 +580,78 @@ public static class Program
             "同条件の後日期限タスクが早い期限タスクより高い優先度になりました。");
         Assert(result.Recommendation?.Task.Identifier == earlyTask.Identifier,
             "同条件の早い期限タスクが推薦されませんでした。");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>余裕のある翌日期限も後日の後続解放加点に埋もれないことを検証する。</summary>
+    private static Task TestNearDeadlineBeforeUnblockingAsync()
+    {
+        // 翌日の短い作業と長い作業を、翌週に後続2件を解放する同重要度の作業と比較する。
+        DateTimeOffset currentTime = StandardTime();
+        ManagedTask shortTask = CreateTask("near-short", "翌日の短い作業");
+        shortTask.DeadlineAt = currentTime.AddDays(1).AddHours(10);
+        shortTask.DeadlineType = TaskConstants.TargetDeadlineType;
+        ManagedTask longTask = CreateTask("near-long", "翌日の長い作業");
+        longTask.DeadlineAt = shortTask.DeadlineAt;
+        longTask.DeadlineType = TaskConstants.TargetDeadlineType;
+        longTask.RemainingMinutes = 120;
+        longTask.DeferralCount = 1;
+        ManagedTask laterTask = CreateTask("later-unblocking", "翌週の先行作業");
+        laterTask.DeadlineAt = currentTime.AddDays(9).AddHours(10);
+        laterTask.DeadlineType = TaskConstants.TargetDeadlineType;
+        laterTask.RemainingMinutes = 90;
+        ManagedTask firstDependent = CreateTask("later-dependent-one", "後続作業1");
+        firstDependent.DependencyIdentifiers = [laterTask.Identifier];
+        ManagedTask secondDependent = CreateTask("later-dependent-two", "後続作業2");
+        secondDependent.DependencyIdentifiers = [laterTask.Identifier];
+
+        RecommendationResult result = CreatePureRecommendationService(currentTime).SelectRecommendation(
+            currentTime,
+            new TaskManagerSettings(),
+            [shortTask, longTask, laterTask, firstDependent, secondDependent],
+            []);
+        TaskEvaluation laterEvaluation = result.Evaluations.Single(evaluation => evaluation.Task.Identifier == laterTask.Identifier);
+        foreach (TaskEvaluation nearEvaluation in result.Evaluations.Where(evaluation => evaluation.Task.Identifier != laterTask.Identifier))
+        {
+            Assert(nearEvaluation.SlackMinutes > 1000, "余裕がある期限の再現条件を満たしていません。");
+            Assert(nearEvaluation.PriorityScore > laterEvaluation.PriorityScore,
+                "翌日期限が後日の後続解放加点より低い優先度になりました。");
+        }
+        Assert(result.Recommendation?.Task.Identifier == longTask.Identifier,
+            "翌日期限の候補内で延期加点を比較できませんでした。");
+        RecommendationResult filteredResult = RecommendationService.FilterRecommendation(result, TaskConstants.WorkCategory, null);
+        Assert(filteredResult.Recommendation?.Task.Identifier == longTask.Identifier,
+            "絞り込んだ推薦へ翌日期限の優先度が反映されませんでした。");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>余裕時間が正の段階でも期限の接近と期限種別を評価できることを検証する。</summary>
+    private static Task TestDeadlineRiskWithPositiveSlackAsync()
+    {
+        // 従来0点になっていた余裕の大きいタスクを、時刻と期限種別だけ変えて評価する。
+        DateTimeOffset currentTime = StandardTime();
+        ManagedTask task = CreateTask("positive-slack", "余裕のある期限作業");
+        task.DeadlineAt = currentTime.AddDays(2);
+        task.DeadlineType = TaskConstants.TargetDeadlineType;
+        RecommendationService service = CreatePureRecommendationService(currentTime);
+        TaskManagerSettings settings = new();
+        TaskEvaluation initialEvaluation = service.SelectRecommendation(currentTime, settings, [task], []).Evaluations.Single();
+        TaskEvaluation laterEvaluation = service.SelectRecommendation(currentTime.AddHours(1), settings, [task], []).Evaluations.Single();
+        Assert(initialEvaluation.DeadlineRisk > 0, "余裕のある期限の評価が0点に切り捨てられました。");
+        Assert(laterEvaluation.DeadlineRisk > initialEvaluation.DeadlineRisk,
+            "期限が接近しても期限リスクが上がりませんでした。");
+        Assert(laterEvaluation.PriorityScore > initialEvaluation.PriorityScore,
+            "期限の接近が表示用の優先度へ反映されませんでした。");
+
+        // 作業条件が同じなら、目安期限を厳守期限より軽く評価し、期限なしを加点しない。
+        task.DeadlineType = TaskConstants.StrictDeadlineType;
+        TaskEvaluation strictEvaluation = service.SelectRecommendation(currentTime, settings, [task], []).Evaluations.Single();
+        Assert(initialEvaluation.DeadlineRisk < strictEvaluation.DeadlineRisk && strictEvaluation.DeadlineRisk < 1,
+            "余裕がある期限で目安と厳守の評価差を保持できませんでした。");
+        task.DeadlineAt = null;
+        task.DeadlineType = TaskConstants.NoDeadlineType;
+        TaskEvaluation undatedEvaluation = service.SelectRecommendation(currentTime, settings, [task], []).Evaluations.Single();
+        Assert(undatedEvaluation.DeadlineRisk == 0, "期限なしの作業へ期限リスクを加点しました。");
         return Task.CompletedTask;
     }
 

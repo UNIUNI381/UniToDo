@@ -587,7 +587,8 @@ public sealed class RecommendationService(
             return 1;
         }
         double normalizationMinutes = Math.Max(groupBufferedMinutes * 4, 240);
-        double deadlineRisk = 1 - Clamp(slackMinutes / normalizationMinutes);
+        // 余裕が大きい段階でも0へ切り捨てず、余裕の減少に合わせて期限の近さを連続的に加点する。
+        double deadlineRisk = normalizationMinutes / (normalizationMinutes + slackMinutes);
         if (effectiveDeadline.DeadlineType == TaskConstants.TargetDeadlineType)
         {
             deadlineRisk *= 0.75;
