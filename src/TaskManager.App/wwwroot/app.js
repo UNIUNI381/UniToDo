@@ -3464,6 +3464,8 @@ function openTimeEntryDialog(timeEntryIdentifier = null, suppliedEntry = null) {
     || applicationState.dashboardResult?.reviewTimeEntries?.find(entry => entry.identifier === timeEntryIdentifier);
   const isActiveEntry = Boolean(timeEntry && !timeEntry.endAt);
   form.reset();
+  // hidden入力のIDはresetで消えないため、新規追加では明示的に空にする。
+  form.elements.namedItem("identifier").value = timeEntry?.identifier || "";
   form.dataset.activeEntry = String(isActiveEntry);
   document.getElementById("time-entry-dialog-title").textContent = timeEntry ? "作業ログを編集" : "作業ログを追加";
   document.getElementById("void-time-entry").classList.toggle("hidden", !timeEntry || isActiveEntry);
@@ -3477,7 +3479,6 @@ function openTimeEntryDialog(timeEntryIdentifier = null, suppliedEntry = null) {
     form.elements.namedItem(fixedFieldName).disabled = isActiveEntry;
   }
   if (timeEntry) {
-    form.elements.namedItem("identifier").value = timeEntry.identifier;
     form.elements.namedItem("title").value = timeEntry.title;
     form.elements.namedItem("taskIdentifier").value = timeEntry.taskIdentifier || "";
     form.elements.namedItem("projectIdentifier").value = timeEntry.projectIdentifier || "";
