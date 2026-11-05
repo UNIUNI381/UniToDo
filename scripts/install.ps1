@@ -1,7 +1,58 @@
-param([switch]$SkipPublish)
+﻿param([switch]$SkipPublish, [switch]$SkillsOnly, [string]$UserSkillDirectory)
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot "common.ps1")
+
+function Sync-TaskOperationSkill {
+    # 正本の全ファイルを両配布先へ同期し、SHA256一致まで検証する。
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceDirectory,
+        [Parameter(Mandatory = $true)][string[]]$DestinationDirectories
+    )
+    # コピー前に全配布先を確認し、導入先不足による片側だけの更新を防ぐ。
+    if (-not (Test-Path -LiteralPath (Join-Path $SourceDirectory "SKILL.md") -PathType Leaf)) {
+        throw "Skill source is missing: $SourceDirectory"
+    }
+    foreach ($destinationDirectory in $DestinationDirectories) {
+        if (-not (Test-Path -LiteralPath $destinationDirectory -PathType Container)) {
+            throw "Skill destination is missing; install it first: $destinationDirectory"
+        }
+    }
+    $sourceRoot = [IO.Path]::GetFullPath($SourceDirectory).TrimEnd('\', '/')
+    $sourceFiles = @(Get-ChildItem -LiteralPath $sourceRoot -Recurse -File)
+    foreach ($destinationDirectory in $DestinationDirectories) {
+        foreach ($sourceFile in $sourceFiles) {
+            $relativePath = $sourceFile.FullName.Substring($sourceRoot.Length + 1)
+            $destinationFile = Join-Path $destinationDirectory $relativePath
+            $sourceHash = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash
+            # 差分のある正本ファイルだけを上書きし、配布先固有の追加ファイルは保持する。
+            if (-not (Test-Path -LiteralPath $destinationFile -PathType Leaf) -or
+                (Get-FileHash -LiteralPath $destinationFile -Algorithm SHA256).Hash -ne $sourceHash) {
+                New-Item -ItemType Directory -Path (Split-Path -Parent $destinationFile) -Force | Out-Null
+                Copy-Item -LiteralPath $sourceFile.FullName -Destination $destinationFile -Force
+            }
+            if ((Get-FileHash -LiteralPath $destinationFile -Algorithm SHA256).Hash -ne $sourceHash) {
+                throw "Skill verification failed: $destinationFile"
+            }
+        }
+        Write-Output "Skill verified ($($sourceFiles.Count) files): $destinationDirectory"
+    }
+}
+
+# Skillだけの更新では、本体の発行・停止・再起動を行わない。
+$installDirectory = Join-Path $env:LOCALAPPDATA "Programs\TaskManager"
+if ([string]::IsNullOrWhiteSpace($UserSkillDirectory)) {
+    $codexDirectory = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE ".codex" }
+    $UserSkillDirectory = Join-Path $codexDirectory "skills\manage-local-tasks"
+}
+$skillSyncArguments = @{
+    SourceDirectory = Join-Path $ProjectRoot ".agents\skills\manage-local-tasks"
+    DestinationDirectories = @($UserSkillDirectory, (Join-Path $installDirectory "assistant-skill"))
+}
+if ($SkillsOnly) {
+    Sync-TaskOperationSkill @skillSyncArguments
+    return
+}
 
 function New-TaskManagerShortcut {
     # UniToDoを起動するWindowsショートカットを作成する。 ASCII.
@@ -107,6 +158,9 @@ Unregister-ScheduledTask -TaskName $legacyScheduledTaskName -Confirm:$false -Err
 Stop-InstalledTaskManager -ExecutablePath $applicationExecutable
 New-Item -ItemType Directory -Path $installDirectory -Force | Out-Null
 Copy-Item -Path (Join-Path $publishDirectory "*") -Destination $installDirectory -Recurse -Force
+# 初回の本体導入では共通Skillの配布先も作成する。
+New-Item -ItemType Directory -Path $UserSkillDirectory -Force | Out-Null
+Sync-TaskOperationSkill @skillSyncArguments
 $startupDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::Startup)
 $desktopDirectory = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
 $legacyShortcutName = "TaskManager.lnk"

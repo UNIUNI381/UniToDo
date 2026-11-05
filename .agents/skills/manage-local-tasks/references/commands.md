@@ -115,6 +115,10 @@ APIが失敗した場合は破壊的な変更を実行しない。返された�
 
 締切だけを変えるJSON例：`{"deadlineAt":"2026-09-10T18:00:00+09:00","deadlineOrigin":"explicit"}`。期限種別を省略すると現在の種別を維持する。`deadlineAt`だけでも由来は自動的に`explicit`になる。期限解除を指示された場合は`{"deadlineAt":null}`を使う。
 
+## 延期
+
+`postpone ID --minutes 60 --verify --json` は実行可能へ戻し、作業タイマーを停止し、延期回数を加算する。開始可能日は実行時刻から指定分数後になる。日付指定の延期は、先にこの状態操作を検証してから `update ID --file - --verify --json` で指定の `earliestStartAt`・`deadlineAt` を設定する。最後の読戻しで状態と指定日時を確認する。途中失敗では後続・再送を止め、反映済みの操作を報告する。
+
 ## 新規登録用の最小タスクJSON
 
 ```json

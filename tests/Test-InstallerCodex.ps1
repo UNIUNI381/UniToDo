@@ -39,11 +39,56 @@ $integrationArguments = @{
 }
 
 try {
+    # 架空の両配布先で、古い本文・不足する参照ファイルの更新と追加ファイル保持を検証する。
+    $developmentInstallerPath = Join-Path $ProjectRoot "scripts\install.ps1"
+    $developmentSyntax = [System.Management.Automation.Language.Parser]::ParseFile($developmentInstallerPath, [ref]$parseTokens, [ref]$parseErrors)
+    Assert-InstallerCondition ($parseErrors.Count -eq 0) "開発用install.ps1の構文が不正です。"
+    $syncFunction = $developmentSyntax.Find({
+        # 本体導入を実行せず同期関数だけを抽出する。
+        param($syntaxNode)
+        $syntaxNode -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $syntaxNode.Name -eq "Sync-TaskOperationSkill"
+    }, $false)
+    . ([ScriptBlock]::Create($syncFunction.Extent.Text))
+    $syncSource = Join-Path $testRoot "source"
+    $syncDestinations = @((Join-Path $testRoot "common skill"), (Join-Path $testRoot "assistant-skill"))
+    New-Item -ItemType Directory -Path (Join-Path $syncSource "references") -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $syncSource "SKILL.md"), "updated skill")
+    [IO.File]::WriteAllText((Join-Path $syncSource "references\commands.md"), "updated commands")
+    foreach ($syncDestination in $syncDestinations) {
+        New-Item -ItemType Directory -Path $syncDestination -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $syncDestination "SKILL.md"), "old skill")
+        [IO.File]::WriteAllText((Join-Path $syncDestination "custom.txt"), "preserve")
+    }
+    $missingDestinationRejected = $false
+    try { Sync-TaskOperationSkill -SourceDirectory $syncSource -DestinationDirectories @($syncDestinations[0], (Join-Path $testRoot "missing")) | Out-Null }
+    catch { $missingDestinationRejected = $true }
+    Assert-InstallerCondition $missingDestinationRejected "配布先不足を拒否しません。"
+    Assert-InstallerCondition ([IO.File]::ReadAllText((Join-Path $syncDestinations[0] "SKILL.md")) -ceq "old skill") "事前確認失敗で片側を更新しました。"
+    Sync-TaskOperationSkill -SourceDirectory $syncSource -DestinationDirectories $syncDestinations | Out-Null
+    foreach ($syncDestination in $syncDestinations) {
+        Assert-InstallerCondition ([IO.File]::ReadAllText((Join-Path $syncDestination "SKILL.md")) -ceq "updated skill") "Skill本文が同期されません。"
+        Assert-InstallerCondition ([IO.File]::ReadAllText((Join-Path $syncDestination "references\commands.md")) -ceq "updated commands") "参照が同期されません。"
+        Assert-InstallerCondition ([IO.File]::ReadAllText((Join-Path $syncDestination "custom.txt")) -ceq "preserve") "追加ファイルが変わりました。"
+        [IO.File]::SetLastWriteTimeUtc((Join-Path $syncDestination "SKILL.md"), [DateTime]::UtcNow.AddDays(-1))
+    }
+    $previousSkillWriteTime = [IO.File]::GetLastWriteTimeUtc((Join-Path $syncDestinations[0] "SKILL.md"))
+    Sync-TaskOperationSkill -SourceDirectory $syncSource -DestinationDirectories $syncDestinations | Out-Null
+    Assert-InstallerCondition ([IO.File]::GetLastWriteTimeUtc((Join-Path $syncDestinations[0] "SKILL.md")) -eq $previousSkillWriteTime) "一致したファイルを書き直しました。"
+
+    # 以降の導入テストが使う未作成状態へ戻す。
+    $integrationTestRoot = Join-Path $testRoot "integration"
+    $integrationArguments.UserProfileDirectory = Join-Path $integrationTestRoot "受取人 O'Brien"
+    $integrationArguments.CodexDirectory = Join-Path $integrationTestRoot "custom codex"
+    $profileDirectory = $integrationArguments.UserProfileDirectory
+    $codexDirectory = $integrationArguments.CodexDirectory
+    $rulePath = Join-Path $codexDirectory "rules\unitodo-taskctl.rules"
+    $skillDirectory = Join-Path $profileDirectory ".agents\skills\manage-local-tasks"
+    $wrapperPath = Join-Path $skillDirectory "scripts\invoke-taskctl.ps1"
     # 事前確認とCodex連携の省略では、Skillもルールも作成しない。
     Install-CodexTaskIntegration @integrationArguments -WhatIf | Out-Null
-    Assert-InstallerCondition (-not (Test-Path -LiteralPath $testRoot)) "WhatIfでファイルを作成しました。"
+    Assert-InstallerCondition (-not (Test-Path -LiteralPath $integrationTestRoot)) "WhatIfでファイルを作成しました。"
     Install-CodexTaskIntegration @integrationArguments -SkipCodexSkill | Out-Null
-    Assert-InstallerCondition (-not (Test-Path -LiteralPath $testRoot)) "SkipCodexSkillでファイルを作成しました。"
+    Assert-InstallerCondition (-not (Test-Path -LiteralPath $integrationTestRoot)) "SkipCodexSkillでファイルを作成しました。"
 
     # 既存の共通ルールを保持して、導入先のラッパーだけを許可するルールを追加する。
     $defaultRulePath = Join-Path $codexDirectory "rules\default.rules"
