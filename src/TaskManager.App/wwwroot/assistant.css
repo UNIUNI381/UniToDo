@@ -22,7 +22,8 @@
 .assistant-prompt button { margin: 6px 8px 0 0; }
 .assistant-composer { padding: 12px 18px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid #e2e8e4; display: grid; gap: 8px; }
 .assistant-composer label { font-size: 13px; }
-.assistant-composer textarea { resize: vertical; width: 100%; min-height: 70px; max-height: 180px; box-sizing: border-box; font: inherit; padding: 10px; border: 1px solid #b7c9bf; border-radius: 10px; }
+/* 内容に合わせて自動伸縮し、上限を超えた長文は入力欄内でスクロールする。 */
+.assistant-composer textarea { resize: none; overflow-y: auto; width: 100%; min-height: 70px; max-height: 180px; box-sizing: border-box; font: inherit; padding: 10px; border: 1px solid #b7c9bf; border-radius: 10px; }
 .assistant-composer small { color: #68766d; font-size: 11px; }
 @media (max-width: 680px) {
   .assistant-panel { inset: var(--assistant-viewport-top, 0px) 0 auto; width: 100%; height: var(--assistant-viewport-height, 100dvh); border: 0; border-radius: 0; }

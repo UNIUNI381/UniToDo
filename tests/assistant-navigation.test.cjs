@@ -36,6 +36,7 @@ function createHarness(mobile = true) {
   };
   const window = {
     history, matchMedia: () => ({ matches: mobile }), innerHeight: 800,
+    getComputedStyle: () => ({ borderTopWidth: "1px", borderBottomWidth: "1px" }),
     addEventListener: (name, callback) => { listeners[name] = callback; },
     setTimeout: () => 1, clearTimeout() {}, requestAnimationFrame: () => 1
   };

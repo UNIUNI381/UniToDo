@@ -23,6 +23,15 @@
   let closingNavigation = null;
   let finishClosingNavigation = null;
 
+  function resizeTextInput() {
+    // 折り返しと改行に合わせて入力欄を伸縮し、最大高さは画面側の指定に従う。
+    textInput.style.height = "";
+    const appearance = window.getComputedStyle(textInput);
+    // 内容の高さへ上下の枠線を加え、枠を含む入力欄の高さに合わせる。
+    const borderHeight = Number.parseFloat(appearance.borderTopWidth) + Number.parseFloat(appearance.borderBottomWidth);
+    textInput.style.height = `${Math.ceil(textInput.scrollHeight + borderHeight)}px`;
+  }
+
   function updateViewport() {
     // Androidの表示可能領域へ高さと位置を合わせ、キーボード背後へのはみ出しを防ぐ。
     viewportFrame = null;
@@ -39,6 +48,7 @@
       panel.style.removeProperty("--assistant-viewport-top");
     }
     panel.classList.toggle("assistant-compact", mobile && height < 480);
+    resizeTextInput();
     // レイアウト更新後の末尾へ合わせ、過去履歴を読んでいる場合は位置を維持する。
     if (keepLatest) messageList.scrollTop = messageList.scrollHeight;
   }
@@ -56,6 +66,7 @@
   window.visualViewport?.addEventListener("resize", scheduleViewport, { passive: true });
   window.visualViewport?.addEventListener("scroll", scheduleViewport, { passive: true });
   textInput.addEventListener("focus", scheduleViewport);
+  textInput.addEventListener("input", scheduleViewport);
 
   function showError(message) {
     // エラーはHTMLとして解釈せず、パネル内へ表示する。
@@ -337,6 +348,7 @@
       pendingSubmission = { conversation: snapshot.conversation, requestIdentifier: crypto.randomUUID(), text };
     if (await operate("/messages", pendingSubmission)) {
       textInput.value = "";
+      scheduleViewport();
       pendingSubmission = null;
     }
   });
